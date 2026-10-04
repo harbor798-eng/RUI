@@ -1,0 +1,42 @@
+# ---- Build output ----
+target/
+*.class
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# ---- Logs / crash dumps ----
+*.log
+hs_err_pid*.log
+
+# ---- Local secrets / machine-specific config ----
+application-local.properties
+application-local.yml
+
+# ---- Runtime / local data (real user data, must never be committed) ----
+avatar_cache/
+WSQLite/
+doubaojietu/
+*.db
+*.sqlite
+*.sqlite-journal
+
+# ---- OS junk ----
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# ---- OCR / capture runtime output ----
+capture-poc/capture-poc/out/
+capture-poc/capture-poc/ocr_results.csv
+capture-poc/capture-poc/*.log
+
+# ---- WeChat real-data validation reports ----
+wx_mapping_validation.md
+wx_mysql_import_report.md
+wx_sample_*.json

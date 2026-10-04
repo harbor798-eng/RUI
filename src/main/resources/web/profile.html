@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JEVE · AI档案</title>
+<link rel="stylesheet" href="profile.css">
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="logo">JEVE</div>
+    <div class="nav-section">
+      <div class="nav-label">AI档案</div>
+      <div class="nav-item active" data-page="select"><span class="dot"></span>档案总览</div>
+      <div class="nav-item" data-page="permissions">允许AI观察的范围</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">分析</div>
+      <div class="nav-item" data-page="deep-obs">AI深度观察</div>
+      <div class="nav-item" data-page="stats">聊天信息统计</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- Page: Profile Selection -->
+    <div class="page active" id="page-select">
+      <div class="page-header">
+        <h1>AI档案</h1>
+        <div class="sub">记录关系中两个人的事实信息。AI 发现的信息需经你确认后才会进入档案。</div>
+      </div>
+      <div class="profile-grid">
+        <div class="profile-card" onclick="showDetail('me')">
+          <div class="icon">👤</div>
+          <h3>我的档案</h3>
+          <p>记录关于你的信息</p>
+          <span class="enter">进入档案 →</span>
+        </div>
+        <div class="profile-card" onclick="showDetail('other')">
+          <div class="icon">💬</div>
+          <h3>对方档案</h3>
+          <p>记录关于对方的信息</p>
+          <span class="enter">进入档案 →</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Page: Detail Profile (me/other) -->
+    <div class="page" id="page-detail">
+      <span class="back-link" onclick="goPage('select')">← 返回档案总览</span>
+      <div class="page-header">
+        <h1 id="detail-title">我的档案</h1>
+        <div class="sub">所有字段均为选填，AI 不会因为信息不完整而影响回复质量。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">基础信息</div>
+        <div class="field-row"><div class="field-label">姓名 / 称呼</div><input class="field-input" id="f-name" placeholder="选填"></div>
+        <div class="field-row"><div class="field-label">年龄</div><input class="field-input" id="f-age" placeholder="选填"></div>
+        <div class="field-row"><div class="field-label">性别</div><input class="field-input" id="f-gender" placeholder="选填"></div>
+        <div class="field-row"><div class="field-label">职业</div><input class="field-input" id="f-job" placeholder="选填"></div>
+        <div class="field-row"><div class="field-label">所在地</div><input class="field-input" id="f-location" placeholder="选填"></div>
+        <div class="field-row"><div class="field-label">兴趣爱好</div><input class="field-input" id="f-hobby" placeholder="选填"></div>
+      </div>
+
+      <div class="section-divider">自定义信息</div>
+      <div id="custom-fields"></div>
+      <button class="add-field-btn" onclick="addCustomField()">+ 添加自定义信息</button>
+
+      <div style="margin-top:24px; display:flex; gap:12px;">
+        <button class="btn-primary" onclick="saveProfile()">保存</button>
+      </div>
+    </div>
+
+    <!-- Page: Permissions -->
+    <div class="page" id="page-permissions">
+      <div class="page-header">
+        <h1>允许AI观察的范围</h1>
+        <div class="sub">选择允许 AI 在回复和分析中参考哪些档案信息。关闭的字段不会被加入 AI 的上下文。</div>
+      </div>
+
+      <div class="card">
+        <div class="perm-group-title">我的档案</div>
+        <div id="perm-me-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="perm-group-title">对方档案</div>
+        <div id="perm-other-list"></div>
+      </div>
+    </div>
+
+    <!-- Page: Deep Observation -->
+    <div class="page" id="page-deep-obs">
+      <div class="page-header">
+        <h1>AI深度观察</h1>
+        <div class="sub">AI 对完整聊天记录的深层分析。AI 的推测不会自动写入事实档案，需经你确认。</div>
+      </div>
+
+      <div class="card">
+        <div class="obs-item">
+          <span class="obs-tag">沟通模式</span>
+          <div class="obs-text">对方在工作日晚上回复较为及时，周末回复间隔较长。倾向于先听你说，再给出简短回应。</div>
+        </div>
+        <div class="obs-item">
+          <span class="obs-tag">情绪变化</span>
+          <div class="obs-text">最近两周对话中积极情绪占比上升，主动开启话题的次数增加。</div>
+        </div>
+        <div class="obs-item">
+          <span class="obs-tag warn">待确认</span>
+          <div class="obs-text">AI 推测对方可能喜欢周杰伦的音乐（基于你提到演唱会时对方的积极回应）。<a href="#" style="color:var(--primary); margin-left:8px;">确认加入档案</a></div>
+        </div>
+      </div>
+      <button class="btn-primary" onclick="showToast('已触发深度观察')">开始新的深度观察</button>
+    </div>
+
+    <!-- Page: Stats -->
+    <div class="page" id="page-stats">
+      <div class="page-header">
+        <h1>聊天信息统计</h1>
+        <div class="sub">基于聊天记录的客观数据统计。</div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num">720</div><div class="stat-label">聊天总消息数</div></div>
+        <div class="stat-card"><div class="stat-num">348</div><div class="stat-label">我发送消息数</div></div>
+        <div class="stat-card"><div class="stat-num">372</div><div class="stat-label">对方发送消息数</div></div>
+        <div class="stat-card"><div class="stat-num">2.3h</div><div class="stat-label">平均回复间隔</div></div>
+        <div class="stat-card"><div class="stat-num">18</div><div class="stat-label">我主动发起次数</div></div>
+        <div class="stat-card"><div class="stat-num">12</div><div class="stat-label">对方主动发起次数</div></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast">已保存</div>
+
+<script src="profile.js"></script>
+</body>
+</html>

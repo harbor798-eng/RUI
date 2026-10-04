@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JEVE</title>
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+</head>
+<body>
+  <div class="jeve-shell">
+    <header class="jeve-header" id="jeve-header">
+      <div class="header-left">
+        <button id="header-back" class="header-back" title="返回">‹</button>
+        <h1 class="header-title" id="header-title">AI 快速回复</h1>
+      </div>
+      <div class="header-right">
+        <button id="capture-toggle" class="capture-toggle" data-state="OFF" title="采集开关">
+          <span class="capture-label">采集</span>
+          <span class="capture-switch"><span class="capture-knob"></span></span>
+        </button>
+        <button id="header-settings" class="header-link" data-page="settings">设置</button>
+        <button class="header-close" data-page="close" title="关闭">×</button>
+      </div>
+    </header>
+
+    <main class="main-content" id="main-content"></main>
+
+    <nav class="bottom-nav" id="bottom-nav">
+      <button class="bottom-link" data-page="chat-history">核对记录</button>
+      <button class="bottom-link" data-page="detail-analysis">详细分析</button>
+    </nav>
+  </div>
+
+  <!-- Context menu (right-click message) -->
+  <div id="ctx-menu" class="ctx-menu" style="display:none">
+    <button data-act="edit">修改消息</button>
+    <button data-act="add">添加消息</button>
+  </div>
+
+  <!-- Edit message modal -->
+  <div id="edit-msg-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <h3 class="modal-title">修改消息</h3>
+      <div class="modal-row">
+        <label>发送者</label>
+        <div class="radio-group">
+          <label><input type="radio" name="e-speaker" value="ME"> 我</label>
+          <label><input type="radio" name="e-speaker" value="OTHER" checked> 对方</label>
+        </div>
+      </div>
+      <div class="modal-row">
+        <label>消息时间</label>
+        <div style="display:flex;gap:8px;">
+          <input type="date" id="e-date" style="flex:1" />
+          <input type="time" id="e-time" style="width:110px" />
+        </div>
+      </div>
+      <div class="modal-row">
+        <label>消息内容</label>
+        <textarea id="e-content" rows="4"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="e-cancel" class="ghost">取消</button>
+        <button id="e-save" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add message modal -->
+  <div id="msg-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <h3 class="modal-title">添加消息</h3>
+      <div class="modal-row">
+        <label>发送者</label>
+        <div class="radio-group">
+          <label><input type="radio" name="m-speaker" value="ME"> 我</label>
+          <label><input type="radio" name="m-speaker" value="OTHER" checked> 对方</label>
+        </div>
+      </div>
+      <div class="modal-row">
+        <label>消息时间</label>
+        <div style="display:flex;gap:8px;">
+          <input type="date" id="m-date" style="flex:1" />
+          <input type="time" id="m-time" style="width:110px" />
+        </div>
+      </div>
+      <div class="modal-row">
+        <label>消息内容</label>
+        <textarea id="m-content" rows="4" placeholder="输入消息内容"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="m-cancel" class="ghost">取消</button>
+        <button id="m-save" class="primary">添加</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/router.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

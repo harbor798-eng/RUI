@@ -1,0 +1,13 @@
+{
+  "id": "goutoujunshi",
+  "name": "狗头军师",
+  "version": "1.0.0",
+  "description": "恋爱关系分析知识库（JEVE V1 开发阶段外部参考 Skill）",
+  "author": "shengjidaguai-china",
+  "homepage": "https://github.com/shengjidaguai-china/goutoujunshi",
+  "license": "LICENSE",
+  "type": "knowledge-skill",
+  "enabled": true,
+  "knowledgePath": "knowledge",
+  "notes": "本 Skill 作为 JEVE V1 开发阶段的外部知识库来源。原始 SKILL.md 仅存档于 source/ORIGINAL_SKILL.md，不会自动作为 JEVE 全局系统提示词加载。"
+}
