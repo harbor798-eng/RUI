@@ -39,7 +39,7 @@ public class HistoryAnchor {
 
     public void reset() { pending.clear(); }
 
-    private static String norm(String s) { return s == null ? "" : s.replaceAll("\\s+", ""); }
+    private static String norm(String s) { return TextNorm.norm(s); }
     private static int cy(MessageRecognizer.Candidate c) { return (c.y1 + c.y2) / 2; }
     private static String key(MessageRecognizer.Candidate c) {
         return c.sender + "|" + norm(c.text);

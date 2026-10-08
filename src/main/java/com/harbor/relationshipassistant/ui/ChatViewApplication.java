@@ -66,6 +66,10 @@ import java.util.Optional;
  */
 public class ChatViewApplication extends Application {
 
+    /** Set after stage.show(); used by single-instance activator to bring window forward. */
+    public static volatile javafx.stage.Stage primaryStage;
+    private MainController controllerRef;
+
     private static final Logger log = LoggerFactory.getLogger(ChatViewApplication.class);
     private static final int PAGE_SIZE = 50;
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("MM-dd HH:mm");
@@ -106,6 +110,7 @@ public class ChatViewApplication extends Application {
         AppConfig config = new AppConfig();
         appConfig = config;
         appDs = new DataSourceFactory(config);
+        appDs.migrate();
         DataSourceFactory ds = appDs;
         this.relRepo = new com.harbor.relationshipassistant.infrastructure.persistence.RelationshipRepository(ds);
         chat = new ChatService(new ChatMessageRepository(ds), new AuditLogRepository(ds));
@@ -163,14 +168,33 @@ public class ChatViewApplication extends Application {
             FXMLLoader loader = new FXMLLoader(fxmlUrl);
             Parent root = loader.load();
             MainController controller = loader.getController();
+            controllerRef = controller;
+            controller.setSkillManager(skillManager);
             controller.inject(ds, config.aesKey(), relationshipId, stage);
 
-            stage.initStyle(StageStyle.UNDECORATED);
+            stage.initStyle(StageStyle.TRANSPARENT);
             stage.setTitle("JEVE");
-            Scene scene = new Scene(root, 350, 650);
+            // Wrap FXML root in a rounded frame so the whole window has soft corners.
+            javafx.scene.layout.StackPane frame = new javafx.scene.layout.StackPane(root);
+            frame.setStyle("-fx-background-color: #F6F5F2; -fx-background-radius: 18; -fx-background-insets: 0;");
+            javafx.scene.shape.Rectangle clip = new javafx.scene.shape.Rectangle();
+            double r = 18;
+            clip.setArcWidth(r * 2);
+            clip.setArcHeight(r * 2);
+            clip.widthProperty().bind(frame.widthProperty());
+            clip.heightProperty().bind(frame.heightProperty());
+            frame.setClip(clip);
+            Scene scene = new Scene(frame, 350, 650, javafx.scene.paint.Color.TRANSPARENT);
             stage.setScene(scene);
             stage.centerOnScreen();
+            try {
+                var iconUrl = getClass().getResource("/web/rui-icon.png");
+                if (iconUrl != null) stage.getIcons().add(new javafx.scene.image.Image(iconUrl.toExternalForm()));
+            } catch (Exception e) {
+                log.warn("[UI] icon load failed: {}", e.toString());
+            }
             stage.show();
+            primaryStage = stage;
             log.info("[UI_SIZE] width={} height={}", String.format("%.0f", stage.getWidth()), String.format("%.0f", stage.getHeight()));
             log.info("[UI] Main FXML window shown, UNDECORATED");
         } catch (Exception e) {
@@ -179,8 +203,7 @@ public class ChatViewApplication extends Application {
         }
     }
 
-    private String currentRelationshipName() {
-        try {
+    private String currentRelationshipName() {        try {
             for (var r : relRepo.listActive()) {
                 if (r.getId() == relationshipId) return r.getName();
             }
@@ -817,7 +840,12 @@ public class ChatViewApplication extends Application {
             log.info("[RealtimeCaptureUI] Application stopping, stopping capture service");
             try { realtimeCaptureService.stop(); } catch (Exception ignored) {}
         }
+        try { if (controllerRef != null) controllerRef.shutdown(); } catch (Exception ignored) {}
+        try { ChatViewLauncher.closeLock(); } catch (Exception ignored) {}
+        primaryStage = null;
         super.stop();
+        // Ensure JVM exits even if some non-daemon thread lingers.
+        javafx.application.Platform.exit();
     }
 
     /** 首次启动：Welcome + AI Setup。返回 true 表示配置完成可继续。 */

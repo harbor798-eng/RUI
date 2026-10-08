@@ -22,7 +22,7 @@ public class CaptureSession {
     }
 
     private String fingerprint(MessageRecognizer.Candidate c) {
-        return c.sender + "|" + c.text.replaceAll("\\s+","");
+        return c.sender + "|" + TextNorm.norm(c.text);
     }
 
     public synchronized DiffResult onFrame(List<MessageRecognizer.Candidate> candidates, long nowMs) {

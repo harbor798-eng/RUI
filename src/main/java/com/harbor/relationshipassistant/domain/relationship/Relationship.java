@@ -11,6 +11,7 @@ public class Relationship {
     private String avatarPath;
     private RelationshipStatus status;
     private String goalNote;
+    private String wechatWxid;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -37,6 +38,8 @@ public class Relationship {
     public void setStatus(RelationshipStatus status) { this.status = status; }
     public String getGoalNote() { return goalNote; }
     public void setGoalNote(String goalNote) { this.goalNote = goalNote; }
+    public String getWechatWxid() { return wechatWxid; }
+    public void setWechatWxid(String wechatWxid) { this.wechatWxid = wechatWxid; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

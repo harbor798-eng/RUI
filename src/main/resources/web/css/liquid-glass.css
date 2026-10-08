@@ -1,0 +1,209 @@
+/* ===== RUI Liquid Glass 1.0 — visual layer only ===== */
+/* Semi-transparent warm white surfaces, subtle 1px light borders, soft shadows.
+   backdrop-filter is best-effort (WebKit 622 may ignore it); layered backgrounds
+   and borders carry the glass feel regardless. */
+
+:root {
+  --lg-bg: rgba(246, 245, 242, 0.82);
+  --lg-surface: rgba(255, 255, 255, 0.62);
+  --lg-surface-strong: rgba(255, 255, 255, 0.78);
+  --lg-surface-hover: rgba(255, 255, 255, 0.85);
+  --lg-border: rgba(255, 255, 255, 0.7);
+  --lg-border-soft: rgba(223, 225, 221, 0.55);
+  --lg-shadow: 0 8px 28px rgba(41, 59, 55, 0.08), 0 1px 2px rgba(41, 59, 55, 0.04);
+  --lg-shadow-sm: 0 2px 10px rgba(41, 59, 55, 0.06);
+  --lg-accent-tint: rgba(96, 76, 199, 0.12);
+  --lg-accent-tint-strong: rgba(96, 76, 199, 0.22);
+}
+
+/* Window shell — semi-transparent warm white */
+.jeve-shell, body {
+  background: var(--lg-bg) !important;
+}
+.jeve-shell {
+  background: linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(246,245,242,0.78) 100%) !important;
+}
+
+/* Header — light glass, no heavy bar */
+#jeve-header {
+  background: transparent !important;
+  border-bottom: 1px solid var(--lg-border-soft) !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+}
+
+/* RUI title — keep purple, no glow */
+.brand-title, #page-title {
+  color: var(--jeve-accent) !important;
+}
+
+/* Generic glass cards / content surfaces */
+.qr-card, .da-card, .chat-preview-panel,
+.wi-opt, .settings-item, .modal {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-sm) !important;
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+}
+
+/* Dropdown trigger controls — de-emphasized: clear, lightweight, minimal glass */
+.jeve-dropdown {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Dropdown menus themselves still float */
+.jeve-dropdown-menu {
+  background: var(--lg-surface-strong) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow) !important;
+  backdrop-filter: blur(22px) saturate(1.4);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+}
+.jeve-dropdown-option:hover {
+  background: var(--lg-accent-tint) !important;
+}
+
+/* Primary CTA — purple tinted liquid glass */
+.primary, .qr-generate-big.primary, .qr-generate-big {
+  background: linear-gradient(180deg, rgba(96,76,199,0.88) 0%, rgba(96,76,199,0.78) 100%) !important;
+  border: 1px solid rgba(255,255,255,0.35) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    0 6px 18px rgba(96,76,199,0.28) !important;
+  color: #fff !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.12);
+  transition: transform 120ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+.primary:hover, .qr-generate-big.primary:hover, .qr-generate-big:hover {
+  background: linear-gradient(180deg, rgba(84,64,180,0.92) 0%, rgba(84,64,180,0.82) 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    0 8px 22px rgba(96,76,199,0.34) !important;
+}
+.primary:active, .qr-generate-big:active {
+  transform: scale(0.98);
+}
+
+/* Chat preview toggle — light glass pill */
+.chat-preview-toggle {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-sm) !important;
+  color: var(--jeve-text-secondary) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: background 140ms, color 140ms;
+}
+.chat-preview-toggle:hover {
+  background: var(--lg-accent-tint) !important;
+  color: var(--jeve-accent) !important;
+}
+
+/* Chat preview resync — small glass control */
+.chat-preview-resync {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  color: var(--jeve-accent) !important;
+  box-shadow: var(--lg-shadow-sm) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: background 140ms;
+}
+.chat-preview-resync:hover {
+  background: var(--lg-accent-tint) !important;
+}
+
+/* Chat preview panel — regular glass surface */
+.chat-preview-panel {
+  background: var(--lg-surface-strong) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow) !important;
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+}
+
+/* Header icon buttons (settings / resync / min / close) — glass */
+#header-settings, #header-resync, #header-min, #header-close,
+.header-icon-btn {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-sm) !important;
+  color: var(--jeve-text-secondary) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: background 140ms, color 140ms;
+}
+#header-settings:hover, #header-resync:hover, .header-icon-btn:hover {
+  background: var(--lg-accent-tint) !important;
+  color: var(--jeve-accent) !important;
+}
+/* Close keeps red hover */
+#header-close:hover {
+  background: rgba(239,68,68,0.12) !important;
+  color: #ef4444 !important;
+}
+/* Min keeps blue hover */
+#header-min:hover {
+  background: rgba(59,130,246,0.12) !important;
+  color: #3b82f6 !important;
+}
+
+/* Bottom nav — primary liquid-glass floating layer */
+.bottom-nav {
+  background: rgba(255,255,255,0.55) !important;
+  border: 1px solid var(--lg-border) !important;
+  border-radius: 16px !important;
+  margin: 8px 12px 12px 12px !important;
+  padding: 6px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.6),
+    0 10px 28px rgba(41,59,55,0.14) !important;
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+}
+.bottom-link {
+  color: var(--jeve-text-secondary) !important;
+  transition: color 140ms, background 140ms;
+  border-radius: 10px;
+  padding: 6px 12px !important;
+}
+.bottom-link:hover {
+  color: var(--jeve-accent) !important;
+  background: var(--lg-accent-tint) !important;
+}
+
+/* Ghost buttons — glass */
+.ghost {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-sm) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.ghost:hover {
+  background: var(--lg-accent-tint) !important;
+}
+
+/* Settings list rows */
+.settings-item {
+  background: var(--lg-surface) !important;
+  border: 1px solid var(--lg-border) !important;
+  box-shadow: var(--lg-shadow-sm) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Thin custom scrollbar stays purple */
+.custom-scrollbar { background: transparent !important; }
+.custom-scrollbar-thumb {
+  background: rgba(96, 76, 199, 0.35) !important;
+}
+.custom-scrollbar-thumb:hover {
+  background: rgba(96, 76, 199, 0.55) !important;
+}

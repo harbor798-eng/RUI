@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Optional;
 
 /** Relationship 业务（技术设计 §11/§12/§39）。阶段变更必须同事务写历史。 */
 public class RelationshipService {
@@ -30,16 +31,59 @@ public class RelationshipService {
     }
 
     public Relationship create(String name, String myName, RelationshipStage stage) {
+        return create(name, myName, stage, null);
+    }
+
+    public Relationship create(String name, String myName, RelationshipStage stage, String wechatWxid) {
         if (name == null || name.isBlank()) {
             throw new ValidationException("对方昵称不能为空", "RelationshipService.create");
         }
-        Relationship r = repository.insert(Relationship.createNew(name.trim(), myName, stage));
-        audit.log(r.getId(), "RELATIONSHIP_CREATE", "name=" + name);
-        log.info("[REL] 创建关系 id={} name={}", r.getId(), r.getName());
-        return r;
+        Relationship r = Relationship.createNew(name.trim(), myName, stage);
+        r.setWechatWxid(wechatWxid == null || wechatWxid.isBlank() ? null : wechatWxid.trim());
+        Relationship inserted = repository.insert(r);
+        audit.log(inserted.getId(), "RELATIONSHIP_CREATE", "name=" + name + " wxid=" + inserted.getWechatWxid());
+        log.info("[REL] 创建关系 id={} name={} wxid={}", inserted.getId(), inserted.getName(), inserted.getWechatWxid());
+        return inserted;
+    }
+
+    public Optional<Relationship> findByWechatWxid(String wxid) {
+        if (wxid == null || wxid.isBlank()) return Optional.empty();
+        return repository.findByWechatWxid(wxid.trim());
+    }
+
+    public List<Relationship> findByName(String name) {
+        if (name == null || name.isBlank()) return List.of();
+        return repository.findByName(name.trim());
+    }
+
+    /**
+     * 把指定 wxid 绑定到 relationshipId。
+     * 幂等：若目标 relationship 已经绑该 wxid，直接成功。
+     * 拒绝：wxid 非法；wxid 已绑定到其他 relationship。
+     */
+    public void bindWechatWxid(long relationshipId, String wxid) {
+        if (wxid == null || wxid.trim().isEmpty()) {
+            throw new ValidationException("wxid 不能为空", "RelationshipService.bindWechatWxid");
+        }
+        String trimmed = wxid.trim();
+        Optional<Relationship> owner = repository.findByWechatWxid(trimmed);
+        if (owner.isPresent()) {
+            if (owner.get().getId() == relationshipId) {
+                return; // 幂等
+            }
+            throw new ValidationException("wxid " + trimmed + " 已绑定到 relationship id=" + owner.get().getId(),
+                    "RelationshipService.bindWechatWxid");
+        }
+        repository.updateWechatWxid(relationshipId, trimmed);
     }
 
     public Relationship get(Long id) { return repository.findById(id); }
+
+    /** 仅用于补偿：把本次刚绑定的 wxid 解绑（不触碰其它字段）。 */
+    public void unbindWechatWxid(long relationshipId) {
+        repository.updateWechatWxid(relationshipId, null);
+        audit.log(relationshipId, "RELATIONSHIP_WXID_UNBIND", "compensation after confirm failure");
+    }
 
     public List<Relationship> listActive() { return repository.listActive(); }
 

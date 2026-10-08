@@ -7,25 +7,39 @@
   <link rel="stylesheet" href="css/variables.css" />
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/liquid-glass.css" />
+  <style>
+    #header-minimize:hover { background: rgba(64,128,255,.12) !important; color: #4080FF !important; }
+    .header-close:hover { background: rgba(255,80,80,.12) !important; color: #FF5050 !important; }
+  </style>
 </head>
 <body>
   <div class="jeve-shell">
     <header class="jeve-header" id="jeve-header">
       <div class="header-left">
         <button id="header-back" class="header-back" title="返回">‹</button>
-        <h1 class="header-title" id="header-title">AI 快速回复</h1>
+        <h1 class="header-title" id="header-title">RUI</h1>
       </div>
-      <div class="header-right">
-        <button id="capture-toggle" class="capture-toggle" data-state="OFF" title="采集开关">
+      <div class="header-right" style="gap:2px;">
+        <button id="capture-toggle" class="capture-toggle" data-state="OFF" title="采集开关" style="display:none">
           <span class="capture-label">采集</span>
           <span class="capture-switch"><span class="capture-knob"></span></span>
         </button>
-        <button id="header-settings" class="header-link" data-page="settings">设置</button>
-        <button class="header-close" data-page="close" title="关闭">×</button>
+        <button id="header-resync" title="重新读取" style="display:none;width:34px;height:34px;border-radius:50%;background:var(--jeve-surface-secondary,#EEEDE9);color:var(--jeve-accent,#604CC7);border:1px solid var(--jeve-border,#DFE1DD);cursor:pointer;font-size:17px;font-weight:700;line-height:1;align-items:center;justify-content:center;padding:0;margin:0 4px 0 0;box-shadow:var(--shadow-sm,0 1px 2px rgba(0,0,0,.04));">↻</button>
+        <button id="header-settings" class="header-link header-icon-btn" data-page="settings" aria-label="设置" title="设置">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button id="header-minimize" title="最小化" style="background:none;border:none;color:var(--jeve-text-secondary,#43534F);cursor:pointer;font-size:20px;line-height:1;width:32px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;margin:0 2px 0 0;padding:0;transition:background 120ms ease,color 120ms ease;">−</button>
+        <button class="header-close" data-page="close" title="关闭" style="font-size:20px;width:32px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;margin:0;padding:0;background:none;border:none;color:var(--jeve-text-secondary,#43534F);cursor:pointer;transition:background 120ms ease,color 120ms ease;">×</button>
       </div>
     </header>
 
-    <main class="main-content" id="main-content"></main>
+    <div class="main-scroll-viewport">
+      <main class="main-content" id="main-content"></main>
+      <div id="main-scrollbar" class="custom-scrollbar" aria-hidden="true">
+        <div id="main-thumb" class="custom-scrollbar-thumb"></div>
+      </div>
+    </div>
 
     <nav class="bottom-nav" id="bottom-nav">
       <button class="bottom-link" data-page="chat-history">核对记录</button>
@@ -97,7 +111,56 @@
     </div>
   </div>
 
-  <script src="js/router.js"></script>
-  <script src="js/app.js"></script>
+  <!-- Wechat history import modal -->
+  <div id="wechat-import-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <h3 class="modal-title">微信历史导入</h3>
+      <div class="modal-row">
+        <label>WChatSJ 目录</label>
+        <input id="wi-root" placeholder="例如 C:\Users\Harbor\Desktop\demo\demo02\WChatSJ" />
+        <button id="wi-scan" class="ghost" style="margin-top:6px">扫描联系人</button>
+      </div>
+      <div id="wi-self-block" class="modal-row" style="display:none">
+        <label>根据聊天数据推测，以下账号可能是你，请确认</label>
+        <div id="wi-self-list" class="wi-list"></div>
+      </div>
+      <div id="wi-contact-block" class="modal-row" style="display:none">
+        <label>选择要导入的联系人</label>
+        <div class="wi-viewport" style="position:relative;height:200px;overflow:hidden">
+          <div id="wi-contact-list" class="wi-list"></div>
+          <div id="wi-scrollbar" class="custom-scrollbar"><div id="wi-thumb" class="custom-scrollbar-thumb"></div></div>
+        </div>
+        <div id="wi-find-row" style="margin-top:8px;display:flex;gap:6px;">
+          <input id="wi-alias" placeholder="输入对方微信号（alias）" style="flex:1" />
+          <button id="wi-find" class="ghost">查找</button>
+        </div>
+        <div id="wi-find-status" class="muted"></div>
+      </div>
+      <div id="wi-status" class="muted" style="margin-top:6px"></div>
+      <div class="modal-actions">
+        <button id="wi-cancel" class="ghost">关闭</button>
+        <button id="wi-run" class="primary" disabled>开始导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wechat import result modal -->
+  <div id="wechat-result-modal" class="modal-mask" style="display:none">
+    <div class="modal">
+      <h3 class="modal-title" id="wr-title">✓ 导入成功</h3>
+      <div class="wr-contact" id="wr-contact"></div>
+      <div class="wr-stats">
+        <div class="wr-row"><span>解析消息</span><b id="wr-parsed">0</b><span class="muted">条</span></div>
+        <div class="wr-row"><span>新增消息</span><b id="wr-inserted">0</b><span class="muted">条</span></div>
+        <div class="wr-row"><span>已存在</span><b id="wr-duplicates">0</b><span class="muted">条</span></div>
+      </div>
+      <div class="modal-actions">
+        <button id="wr-close" class="primary">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/router.js?v=73"></script>
+  <script src="js/app.js?v=73"></script>
 </body>
 </html>

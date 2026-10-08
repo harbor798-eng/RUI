@@ -3,3 +3,11 @@
 db.url=jdbc:mysql://localhost:3306/relationship_assistant?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
 db.username=root
 db.password=在这里填写你的root密码
+
+# Optional: path to Python 3.9+ executable (with wechatauto-replica installed).
+# Windows paths in .properties MUST use forward slashes "/" — single backslash
+# gets eaten by the Java Properties parser. Do NOT write C:\path\to\python.exe.
+# Example:
+# python.executable=C:/Users/You/AppData/Local/Programs/Python/Python311/python.exe
+# python.executable=
+

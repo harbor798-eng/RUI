@@ -41,8 +41,37 @@ public final class InMemoryKnowledgeRetriever implements KnowledgeRetriever {
 
     private static boolean containsAnyToken(String hay, String query) {
         for (String token : query.split("\\s+")) {
-            if (!token.isBlank() && hay.contains(token)) return true;
+            if (token.isBlank()) continue;
+            if (hay.contains(token)) return true;
+            // 中文不分词兜底：把连续非 ASCII 串切成 2-char bigram，提高命中率。
+            for (String bigram : toBigrams(token)) {
+                if (hay.contains(bigram)) return true;
+            }
         }
         return false;
+    }
+
+    private static java.util.List<String> toBigrams(String s) {
+        // 只对长度≥2 的非 ASCII 串切 bigram；英文/数字 token 保持原样。
+        if (s.length() < 2) return java.util.List.of();
+        StringBuilder asciiRun = new StringBuilder();
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < 128) {
+                asciiRun.append(c);
+            } else {
+                if (asciiRun.length() > 0) { asciiRun.setLength(0); }
+            }
+        }
+        // 直接对整个串做 2-gram（包含跨英文/中文边界），简单粗暴。
+        for (int i = 0; i < s.length() - 1; i++) {
+            String bg = s.substring(i, i + 2);
+            // 跳过纯 ASCII bigram（已经 contains(token) 过了）
+            boolean hasNonAscii = false;
+            for (int j = 0; j < bg.length(); j++) if (bg.charAt(j) >= 128) hasNonAscii = true;
+            if (hasNonAscii) out.add(bg);
+        }
+        return out;
     }
 }

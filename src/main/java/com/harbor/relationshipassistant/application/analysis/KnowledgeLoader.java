@@ -28,7 +28,19 @@ public class KnowledgeLoader {
     private final Path knowledgeRoot;
 
     public KnowledgeLoader(KnowledgeRegistry registry) {
-        this(registry, Path.of("skills", "goutoujunshi", "knowledge").toAbsolutePath().normalize());
+        // Phase 25-C: prefer project-root knowledge/; fallback to legacy skills/goutoujunshi/knowledge/.
+        this(registry, resolveKnowledgeRoot());
+    }
+
+    private static Path resolveKnowledgeRoot() {
+        Path global = Path.of("knowledge").toAbsolutePath().normalize();
+        if (Files.isDirectory(global)) {
+            System.out.println("[KnowledgeLoader] using global knowledge root: " + global);
+            return global;
+        }
+        Path legacy = Path.of("skills", "goutoujunshi", "knowledge").toAbsolutePath().normalize();
+        System.out.println("[KnowledgeLoader] global knowledge/ missing; fallback to legacy root: " + legacy);
+        return legacy;
     }
 
     public KnowledgeLoader(KnowledgeRegistry registry, Path knowledgeRoot) {

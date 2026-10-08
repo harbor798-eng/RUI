@@ -43,20 +43,59 @@ public class ScrollDetector {
             return r;
         }
 
-        List<Integer> dys = new ArrayList<>();
-        int up = 0, down = 0;
-        for (MessageRecognizer.Candidate cur : current) {
-            MessageRecognizer.Candidate best = null; double bestSim = 0;
-            for (MessageRecognizer.Candidate p : prev) {
+        // 一对一匹配：收集所有 (prev, curr) 可行对，按 cy 距离排序，贪心分配。
+        // 这样相同文本的多条消息不会被同一个 prev 重复消费。
+        boolean[] usedPrev = new boolean[prev.size()];
+        boolean[] usedCurr = new boolean[current.size()];
+        List<int[]> pairs = new ArrayList<>();
+        for (int ci = 0; ci < current.size(); ci++) {
+            MessageRecognizer.Candidate cur = current.get(ci);
+            for (int pi = 0; pi < prev.size(); pi++) {
+                MessageRecognizer.Candidate p = prev.get(pi);
                 if (p.sender != cur.sender) continue;
                 double s = sim(p.text, cur.text);
-                if (s >= SIM && s > bestSim) { bestSim = s; best = p; }
+                if (s < SIM) continue;
+                int dist = Math.abs(cy(cur) - cy(p));
+                pairs.add(new int[]{pi, ci, dist, (int)(s * 1000)});
             }
-            if (best != null) {
-                int dy = cy(cur) - cy(best);
-                dys.add(dy);
-                if (dy < -5) up++;
-                else if (dy > 5) down++;
+        }
+        // 按 cy 距离升序，距离相同按相似度降序
+        pairs.sort((a, b) -> {
+            if (a[2] != b[2]) return Integer.compare(a[2], b[2]);
+            return Integer.compare(b[3], a[3]);
+        });
+
+        List<Integer> dys = new ArrayList<>();
+        int up = 0, down = 0;
+        for (int[] pair : pairs) {
+            int pi = pair[0], ci = pair[1];
+            if (usedPrev[pi] || usedCurr[ci]) continue;
+            usedPrev[pi] = true;
+            usedCurr[ci] = true;
+            MessageRecognizer.Candidate p = prev.get(pi);
+            MessageRecognizer.Candidate cur = current.get(ci);
+            int dy = cy(cur) - cy(p);
+            dys.add(dy);
+            if (dy < -5) up++;
+            else if (dy > 5) down++;
+            com.harbor.capturepoc.CaptureDiag.log("[ScrollMatch] prev sender=" + p.sender
+                    + " cy=" + cy(p) + " text=\"" + trunc(p.text) + "\""
+                    + " -> curr sender=" + cur.sender
+                    + " cy=" + cy(cur) + " text=\"" + trunc(cur.text) + "\""
+                    + " dy=" + dy + " dist=" + pair[2]);
+        }
+        for (int ci = 0; ci < current.size(); ci++) {
+            if (!usedCurr[ci]) {
+                MessageRecognizer.Candidate cur = current.get(ci);
+                com.harbor.capturepoc.CaptureDiag.log("[ScrollUnmatchedCurr] sender=" + cur.sender
+                        + " cy=" + cy(cur) + " text=\"" + trunc(cur.text) + "\"");
+            }
+        }
+        for (int pi = 0; pi < prev.size(); pi++) {
+            if (!usedPrev[pi]) {
+                MessageRecognizer.Candidate p = prev.get(pi);
+                com.harbor.capturepoc.CaptureDiag.log("[ScrollUnmatchedPrev] sender=" + p.sender
+                        + " cy=" + cy(p) + " text=\"" + trunc(p.text) + "\"");
             }
         }
 
@@ -87,6 +126,12 @@ public class ScrollDetector {
     }
 
     private static int cy(MessageRecognizer.Candidate c) { return (c.y1 + c.y2) / 2; }
+
+    private static String trunc(String s) {
+        if (s == null) return "";
+        String flat = s.replaceAll("\\s+", " ");
+        return flat.length() > 24 ? flat.substring(0, 24) + "..." : flat;
+    }
 
     static double sim(String a, String b) {
         if (a == null || b == null) return 0;

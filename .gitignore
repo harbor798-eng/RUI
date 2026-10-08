@@ -40,3 +40,23 @@ capture-poc/capture-poc/*.log
 wx_mapping_validation.md
 wx_mysql_import_report.md
 wx_sample_*.json
+
+# ---- Real personal WeChat data dumps (never commit) ----
+WChatSJ/
+data/
+mysql_backup_pre_sqlite.sql
+
+# ---- Development isolation area ----
+DEL/
+
+# ---- Python cache ----
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- Release cleanup: dev archives / third-party / historical ----
+skills.zip
+src/main/resources/prompts.zip
+wechatapi-main/
+del/
+ai/

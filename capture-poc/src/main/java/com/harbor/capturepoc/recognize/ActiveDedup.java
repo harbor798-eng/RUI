@@ -49,12 +49,12 @@ public class ActiveDedup {
     public synchronized Result check(long relId, MessageRecognizer.Sender sender,
                                       String rawText, int cy, long nowMs) {
         Result r = new Result();
-        String norm = rawText.replaceAll("\\s+", "");
+        String norm = TextNorm.norm(rawText);
 
         // UNKNOWN 不参与模糊 dedup
         if (sender == MessageRecognizer.Sender.UNKNOWN) {
             r.decision = Decision.NEW;
-            r.sourceMessageId = newSourceId(relId, sender, norm, cy, nowMs);
+            r.sourceMessageId = newSourceId(relId, sender, norm);
             r.reason = "unknown_sender_new";
             return r;
         }
@@ -100,7 +100,7 @@ public class ActiveDedup {
         fp.normText = norm;
         fp.cy = cy;
         fp.lastSeenAt = nowMs;
-        fp.sourceMessageId = newSourceId(relId, sender, norm, cy, nowMs);
+        fp.sourceMessageId = newSourceId(relId, sender, norm);
         active.add(fp);
         r.decision = Decision.NEW;
         r.sourceMessageId = fp.sourceMessageId;
@@ -110,9 +110,14 @@ public class ActiveDedup {
         return r;
     }
 
-    private String newSourceId(long relId, MessageRecognizer.Sender sender, String norm, int cy, long now) {
+    /**
+     * 稳定 Message Identity：基于 relId + sender + 归一化文本。
+     * 不包含 cy / now，因此同一条逻辑消息无论滚动、OCR 抖动、TTL 过期，
+     * 都生成同一 sourceMessageId，使 writer.exists() 真正起到 DB 幂等保护。
+     */
+    private String newSourceId(long relId, MessageRecognizer.Sender sender, String norm) {
         return "ocr-" + Integer.toHexString(
-                (relId + "|" + sender + "|" + norm + "|" + cy + "|" + now).hashCode());
+                (relId + "|" + sender.name() + "|" + norm).hashCode());
     }
 
     /** Levenshtein-based similarity in [0,1]. */

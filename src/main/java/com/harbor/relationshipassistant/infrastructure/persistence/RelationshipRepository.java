@@ -9,6 +9,7 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public class RelationshipRepository {
 
@@ -17,8 +18,8 @@ public class RelationshipRepository {
     public RelationshipRepository(DataSourceFactory ds) { this.ds = ds; }
 
     public Relationship insert(Relationship r) {
-        String sql = "INSERT INTO relationship(name, my_name, current_stage, avatar_path, status, goal_note, created_at, updated_at) " +
-                "VALUES(?,?,?,?,?,?,?,?)";
+        String sql = "INSERT INTO relationship(name, my_name, current_stage, avatar_path, status, goal_note, wechat_wxid, created_at, updated_at) " +
+                "VALUES(?,?,?,?,?,?,?,?,?)";
         LocalDateTime now = LocalDateTime.now(
                 com.harbor.relationshipassistant.infrastructure.importer.wechat.MessageMapper.WECHAT_ZONE);
         try (Connection c = ds.newConnection();
@@ -29,8 +30,9 @@ public class RelationshipRepository {
             ps.setString(4, r.getAvatarPath());
             ps.setString(5, r.getStatus().name());
             ps.setString(6, r.getGoalNote());
-            ps.setObject(7, now);
+            ps.setString(7, r.getWechatWxid());
             ps.setObject(8, now);
+            ps.setObject(9, now);
             ps.executeUpdate();
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) r.setId(rs.getLong(1));
@@ -121,8 +123,56 @@ public class RelationshipRepository {
         r.setAvatarPath(rs.getString("avatar_path"));
         r.setStatus(RelationshipStatus.valueOf(rs.getString("status")));
         r.setGoalNote(rs.getString("goal_note"));
+        r.setWechatWxid(rs.getString("wechat_wxid"));
         r.setCreatedAt(rs.getObject("created_at", LocalDateTime.class));
         r.setUpdatedAt(rs.getObject("updated_at", LocalDateTime.class));
         return r;
+    }
+
+    public Optional<Relationship> findByWechatWxid(String wxid) {
+        String sql = "SELECT * FROM relationship WHERE wechat_wxid=?";
+        try (Connection c = ds.newConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, wxid);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new DatabaseException("按 wxid 查询关系失败", "RelationshipRepository.findByWechatWxid", e);
+        }
+    }
+
+    public List<Relationship> findByName(String name) {
+        String sql = "SELECT * FROM relationship WHERE name=?";
+        try (Connection c = ds.newConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, name);
+            List<Relationship> out = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) out.add(map(rs));
+            }
+            return out;
+        } catch (SQLException e) {
+            throw new DatabaseException("按名称查询关系失败", "RelationshipRepository.findByName", e);
+        }
+    }
+
+    public void updateWechatWxid(long relationshipId, String wxid) {
+        LocalDateTime now = LocalDateTime.now(
+                com.harbor.relationshipassistant.infrastructure.importer.wechat.MessageMapper.WECHAT_ZONE);
+        String sql = "UPDATE relationship SET wechat_wxid=?, updated_at=? WHERE id=?";
+        try (Connection c = ds.newConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, wxid);
+            ps.setObject(2, now);
+            ps.setLong(3, relationshipId);
+            int rows = ps.executeUpdate();
+            if (rows == 0) {
+                throw new DatabaseException("绑定 wxid 失败：relationship id=" + relationshipId + " 不存在",
+                        "RelationshipRepository.updateWechatWxid", null);
+            }
+        } catch (SQLException e) {
+            throw new DatabaseException("绑定 wxid 失败", "RelationshipRepository.updateWechatWxid", e);
+        }
     }
 }

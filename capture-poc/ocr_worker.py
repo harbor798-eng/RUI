@@ -3,6 +3,13 @@ import numpy as np
 from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
 
+# Force UTF-8 stdout so Chinese text is not mangled by Windows cp936.
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 sys.stderr.write("[Worker] loading model...\n"); sys.stderr.flush()
 t0 = time.time()
 engine = RapidOCR()

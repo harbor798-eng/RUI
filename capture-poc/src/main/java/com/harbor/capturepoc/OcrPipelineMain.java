@@ -18,7 +18,24 @@ import java.util.concurrent.*;
 
 public class OcrPipelineMain {
     static final ObjectMapper M = new ObjectMapper();
-    static final String PY = "C:\\Users\\Harbor\\AppData\\Local\\Doubao\\User Data\\sandbox_runtime\\bases\\c98c5042338ed152c6f10ecd8591889f\\python\\python.exe";
+    static final String PY = resolvePython();
+
+    private static String resolvePython() {
+        String p = System.getenv("RUI_PYTHON");
+        if (p != null && !p.isBlank() && new java.io.File(p).isFile()) return p;
+        p = System.getProperty("rui.python");
+        if (p != null && !p.isBlank() && new java.io.File(p).isFile()) return p;
+        String path = System.getenv("PATH");
+        if (path != null) {
+            for (String dir : path.split(";")) {
+                for (String name : new String[]{"python.exe","python3.exe","py.exe"}) {
+                    java.io.File f = new java.io.File(dir, name);
+                    if (f.isFile()) return f.getAbsolutePath();
+                }
+            }
+        }
+        return "python";
+    }
 
     public static void main(String[] args) throws Exception {
         WinDef.HWND hwnd = findWeChat();
@@ -86,10 +103,38 @@ public class OcrPipelineMain {
 
     static class Worker {
         Process p; OutputStream w; BufferedReader r; Thread errT; boolean alive;
+        private static File resolveWorkerScript() {
+            java.util.List<File> candidates = new java.util.ArrayList<>(java.util.Arrays.asList(
+                    new File("ocr_worker.py"),
+                    new File("capture-poc/ocr_worker.py"),
+                    new File("../capture-poc/ocr_worker.py"),
+                    new File("../demo02/capture-poc/ocr_worker.py")));
+            // Walk up from CWD looking for a directory containing capture-poc/ocr_worker.py.
+            File cwd = new File(".").getAbsoluteFile();
+            for (int i = 0; i < 6 && cwd != null; i++) {
+                candidates.add(new File(cwd, "capture-poc/ocr_worker.py"));
+                candidates.add(new File(cwd, "ocr_worker.py"));
+                cwd = cwd.getParentFile();
+            }
+            for (File f : candidates) {
+                if (f.isFile()) {
+                    System.out.println("[Worker] worker script resolved: " + f.getAbsolutePath());
+                    return f;
+                }
+            }
+            System.out.println("[Worker][ERROR] ocr_worker.py not found. Checked paths:");
+            for (File f : candidates) System.out.println("  - " + f.getAbsolutePath() + (f.isFile() ? " (exists)" : " (missing)"));
+            return null;
+        }
         synchronized boolean start() {
             try {
                 long t0=System.currentTimeMillis();
-                p = new ProcessBuilder(PY, "-u", new File("ocr_worker.py").getAbsolutePath()).redirectErrorStream(false).start();
+                File workerScript = resolveWorkerScript();
+                if (workerScript == null) {
+                    System.out.println("[Worker][ERROR] aborting: ocr_worker.py not found");
+                    return false;
+                }
+                p = new ProcessBuilder(PY, "-u", workerScript.getAbsolutePath()).redirectErrorStream(false).start();
                 w = p.getOutputStream();
                 r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8));
                 errT = new Thread(() -> {
@@ -103,9 +148,10 @@ public class OcrPipelineMain {
                 JsonNode j = M.readTree(line);
                 if (!"ready".equals(j.path("type").asText())) { System.out.println("[Worker][ERROR] no ready: "+line); return false; }
                 alive=true;
+                CaptureDiag.log("Worker ready in " + (System.currentTimeMillis()-t0) + "ms pid=" + p.pid());
                 System.out.println("[Worker] ready in "+(System.currentTimeMillis()-t0)+"ms pid="+p.pid());
                 return true;
-            } catch (Exception e) { System.out.println("[Worker][ERROR] start: "+e); return false; }
+            } catch (Exception e) { CaptureDiag.error("Worker.start exception", e); System.out.println("[Worker][ERROR] start: "+e); return false; }
         }
         synchronized JsonNode call(Map<String,Object> req, long timeoutMs) {
             if (!alive) return null;

@@ -38,19 +38,58 @@ public class MessageRecognizer {
             c.confidence = s==Sender.UNKNOWN?0.4:0.9;
             out.add(c);
         }
+        // 后处理：把被其他 Candidate 矩形包含的小 Candidate 合并进去。
+        // 这解决 OCR 把一个气泡里的小字（如"使用"）误拆成独立消息的问题。
+        mergeContained(out);
         return out;
+    }
+
+    /** 如果 candidate A 完全位于 candidate B 的矩形内（或 80% 重叠），合并到 B。 */
+    private void mergeContained(List<Candidate> out) {
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (int i = 0; i < out.size(); i++) {
+                for (int j = 0; j < out.size(); j++) {
+                    if (i == j) continue;
+                    Candidate a = out.get(i); // 可能被包含
+                    Candidate b = out.get(j); // 容器
+                    // a 完全在 b 内部，或重叠面积 > 70% of a
+                    int ax1=Math.max(a.x1,b.x1), ay1=Math.max(a.y1,b.y1);
+                    int ax2=Math.min(a.x2,b.x2), ay2=Math.min(a.y2,b.y2);
+                    if (ax2 <= ax1 || ay2 <= ay1) continue;
+                    int overlap = (ax2-ax1)*(ay2-ay1);
+                    int aArea = (a.x2-a.x1)*(a.y2-a.y1);
+                    if (aArea > 0 && overlap * 100 / aArea >= 70) {
+                        // 合并 a 到 b
+                        b.text = b.text + "\n" + a.text;
+                        b.x1 = Math.min(b.x1, a.x1);
+                        b.y1 = Math.min(b.y1, a.y1);
+                        b.x2 = Math.max(b.x2, a.x2);
+                        b.y2 = Math.max(b.y2, a.y2);
+                        out.remove(i);
+                        changed = true;
+                        break;
+                    }
+                }
+                if (changed) break;
+            }
+        }
     }
 
     private Sender senderOf(OcrItem it, int frameW) {
         double listW = frameW * 0.25;
         double chatW = frameW - listW;
-        double relCenter = (it.cx() - listW) / chatW;
         double relRight = (it.x2 - listW) / chatW;
         double relLeft = (it.x1 - listW) / chatW;
-        // ME：右对齐。长气泡看右边缘/中心；短气泡（OCR 只框文字）看中心是否偏右。
-        if (relRight > 0.85 || relCenter > 0.55) return Sender.ME;
-        // OTHER：左对齐。
-        if (relLeft < 0.15 || relCenter < 0.45) return Sender.OTHER;
+        double relCenter = (it.cx() - listW) / chatW;
+        // 绝对边距判定（更稳定）：
+        // ME 气泡文本右缘应贴近 frameW 右侧（>70% frameW）；
+        // OTHER 气泡文本左缘应贴近 frameW 左侧（<55% frameW）。
+        double absRight = (double) it.x2 / frameW;
+        double absLeft = (double) it.x1 / frameW;
+        if (absRight > 0.70 || relRight > 0.85 || relCenter > 0.55) return Sender.ME;
+        if (absLeft < 0.55 || relLeft < 0.15 || relCenter < 0.45) return Sender.OTHER;
         return Sender.UNKNOWN;
     }
 }

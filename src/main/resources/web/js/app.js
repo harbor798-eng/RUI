@@ -1,10 +1,18 @@
 (function () {
   console.log('[WebUI][INFO] application initialized');
 
+  // Debug overlay visibility: enabled by ?debug=1 or localStorage.jeveDebug='1'
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get('debug') === '1' || localStorage.getItem('jeveDebug') === '1') {
+      document.body.classList.add('jeve-debug');
+    }
+  } catch (e) {}
+
   // ---- WindowDiag overlay (dev) ----
   const dbg = document.createElement('div');
   dbg.id = 'window-diag';
-  dbg.style.cssText = 'position:fixed;right:4px;bottom:4px;width:240px;max-height:140px;overflow:hidden;font-size:10px;background:rgba(255,255,255,0.85);border:1px solid #aaa;padding:4px;z-index:99999;pointer-events:none;font-family:monospace;line-height:1.3';
+  dbg.style.cssText = 'position:fixed;right:4px;bottom:4px;width:240px;max-height:140px;overflow:hidden;font-size:10px;background:rgba(255,255,255,0.92);border:1px solid var(--jeve-border,#ddd);padding:4px;z-index:99999;pointer-events:none;font-family:monospace;line-height:1.3;border-radius:8px;';
   if (document.body) document.body.appendChild(dbg);
   const lines = [];
   function dlog(msg) {
@@ -24,6 +32,15 @@
     dlog('close clicked bridge=' + !!window.desktopBridge);
     if (!window.desktopBridge) return;
     try { window.desktopBridge.closeWindow(); } catch (err) { dlog('close err'); }
+  });
+
+  document.addEventListener('click', (e) => {
+    const minBtn = e.target.closest('#header-minimize');
+    if (!minBtn) return;
+    if (!window.desktopBridge) return;
+    try {
+      if (typeof window.desktopBridge.minimizeWindow === 'function') window.desktopBridge.minimizeWindow();
+    } catch (err) {}
   });
 
   document.addEventListener('click', (e) => {
@@ -54,6 +71,55 @@
     setCollectorState(next);
   });
 
+  // ===== Header dynamic action: 采集 toggle vs 重新读取 =====
+  window.__jeveSourceType = 'database';
+  function updateHeaderAction() {
+    const st = window.__jeveSourceType || 'database';
+    const cap = document.getElementById('capture-toggle');
+    const rs = document.getElementById('header-resync');
+    const page = window.__jevePage || 'home';
+    // capture toggle: only on home when OCR mode
+    if (cap) cap.style.display = (st === 'ocr' && page === 'home') ? '' : 'none';
+    // header resync: only on chat-history page (database mode)
+    if (rs) rs.style.display = (st === 'database' && page === 'chat-history') ? '' : 'none';
+  }
+  window.updateHeaderAction = updateHeaderAction;
+
+  // Load current sourceType and update header
+  fetch('http://127.0.0.1:18080/api/dbsource/config').then(r=>r.json()).then(d=>{
+    if (d && d.success) window.__jeveSourceType = d.sourceType || 'database';
+    updateHeaderAction();
+  }).catch(()=>{ updateHeaderAction(); });
+
+  // Wire header-resync button
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('#header-resync');
+    if (!t) return;
+    if (t.disabled) return;
+    t.disabled = true;
+    const orig = t.textContent;
+    t.classList.add('rs-spinning');
+    t.textContent = '';
+    fetch('http://127.0.0.1:18080/api/dbsource/sync', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+      .then(r=>r.json())
+      .then(d => {
+        // Wait a bit for background sync to start, then refresh chat history if on chat page
+        setTimeout(()=>{
+          t.classList.remove('rs-spinning');
+          t.textContent = orig;
+          t.disabled = false;
+          if (typeof JeveRouter !== 'undefined' && JeveRouter.currentPage === 'chat-history') {
+            try { JeveRouter.navigate('chat-history'); } catch(e){}
+          }
+        }, 1500);
+      })
+      .catch(err => {
+        t.classList.remove('rs-spinning');
+        t.textContent = orig;
+        t.disabled = false;
+      });
+  });
+
   let dragging = false;
   document.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
@@ -70,6 +136,12 @@
     if (!dragging) return;
     dragging = false;
     if (window.desktopBridge) { try { window.desktopBridge.endDrag(); } catch (err) {} }
+  });
+
+  // Edge docking: send mouse position to bridge for real-time reveal/hide
+  document.addEventListener('mousemove', (e) => {
+    if (!window.desktopBridge || typeof window.desktopBridge.onMousePosition !== 'function') return;
+    try { window.desktopBridge.onMousePosition(e.screenX, e.screenY, true); } catch (err) {}
   });
 
   JeveRouter.navigate('home');
