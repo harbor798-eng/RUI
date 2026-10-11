@@ -38,6 +38,14 @@ public final class SkillAdapter {
     public SkillResolution resolve(AnalysisFunction function, String userSelectedSkillName) {
         String userSkill = userSelectedSkillName == null ? "" : userSelectedSkillName.trim();
 
+        // 系统内置 Skill 名视为"未选择"，复用各 Function 的默认路由
+        // (QUICK_REPLY → systemDefaultThreeStrategy; DETAILED_ANALYSIS → goutoujunshi)
+        if (com.harbor.relationshipassistant.application.systemhost.BuiltInSkills
+                .DEFAULT_THREE_STRATEGY_NAME.equals(userSkill)) {
+            log.info("[SKILL-ADAPTER] resolve function={} source=SYSTEM_ALIAS skill={}", function, userSkill);
+            userSkill = "";
+        }
+
         if (!userSkill.isEmpty()) {
             Optional<SkillDescriptor> matched = skillRouter.route(userSkill);
             if (matched.isEmpty()) {

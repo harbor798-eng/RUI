@@ -23,6 +23,10 @@
 .jeve-shell {
   background: linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(246,245,242,0.78) 100%) !important;
 }
+/* Desktop Glass: dark shell layer replaces warm white gradient */
+html[data-theme="desktop-glass"] .jeve-shell {
+  background: rgba(22, 18, 48, 0.78) !important;
+}
 
 /* Header — light glass, no heavy bar */
 #jeve-header {
@@ -207,3 +211,259 @@
 .custom-scrollbar-thumb:hover {
   background: rgba(96, 76, 199, 0.55) !important;
 }
+
+/* ===== Desktop Glass: dark button overrides ===== */
+html[data-theme="desktop-glass"] .primary,
+html[data-theme="desktop-glass"] .qr-generate-big {
+  background: linear-gradient(135deg, #7C3AED 0%, #6366F1 50%, #4F46E5 100%) !important;
+  border: 1px solid rgba(200, 185, 255, 0.4) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+    0 4px 18px rgba(124, 58, 237, 0.4) !important;
+  color: #fff !important;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 120ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+html[data-theme="desktop-glass"] .primary:hover,
+html[data-theme="desktop-glass"] .qr-generate-big:hover {
+  background: linear-gradient(135deg, #8B5CF6 0%, #7373F3 50%, #5B53E8 100%) !important;
+  filter: brightness(1.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
+    0 6px 22px rgba(124, 58, 237, 0.5) !important;
+}
+html[data-theme="desktop-glass"] .primary:active,
+html[data-theme="desktop-glass"] .qr-generate-big:active {
+  transform: scale(0.98);
+  filter: brightness(0.95);
+}
+
+/* Secondary / ghost buttons — dark blue glass */
+html[data-theme="desktop-glass"] .ghost,
+html[data-theme="desktop-glass"] .chat-preview-toggle {
+  background: rgba(48, 42, 92, 0.72) !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  color: #E0D8F5 !important;
+  font-weight: 500;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25) !important;
+  transition: background 140ms, border-color 140ms, color 140ms;
+}
+html[data-theme="desktop-glass"] .ghost:hover,
+html[data-theme="desktop-glass"] .chat-preview-toggle:hover {
+  background: rgba(68, 58, 118, 0.8) !important;
+  border-color: rgba(167, 139, 250, 0.5) !important;
+  color: #fff !important;
+}
+
+/* Header icon buttons — dark glass */
+html[data-theme="desktop-glass"] #header-settings,
+html[data-theme="desktop-glass"] #header-resync,
+html[data-theme="desktop-glass"] #header-min,
+html[data-theme="desktop-glass"] #header-close,
+html[data-theme="desktop-glass"] .header-icon-btn {
+  background: rgba(48, 42, 92, 0.72) !important;
+  border: 1px solid rgba(167, 139, 250, 0.3) !important;
+  color: #D0C6E8 !important;
+  transition: background 140ms, color 140ms;
+}
+html[data-theme="desktop-glass"] #header-settings:hover,
+html[data-theme="desktop-glass"] #header-resync:hover,
+html[data-theme="desktop-glass"] .header-icon-btn:hover {
+  background: rgba(139, 92, 246, 0.3) !important;
+  color: #fff !important;
+}
+
+/* Bottom nav — dark floating bar */
+html[data-theme="desktop-glass"] .bottom-nav {
+  background: rgba(30, 25, 60, 0.85) !important;
+  border: 1px solid rgba(167, 139, 250, 0.28) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 10px 28px rgba(0, 0, 0, 0.4) !important;
+}
+html[data-theme="desktop-glass"] .bottom-link {
+  color: #CFC6E8 !important;
+}
+html[data-theme="desktop-glass"] .bottom-link:hover {
+  color: #C4B5FD !important;
+  background: rgba(139, 92, 246, 0.22) !important;
+}
+
+/* Dropdown menus — dark */
+html[data-theme="desktop-glass"] .jeve-dropdown-menu {
+  background: rgba(30, 25, 60, 0.95) !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+}
+html[data-theme="desktop-glass"] .jeve-dropdown-option:hover {
+  background: rgba(139, 92, 246, 0.28) !important;
+}
+
+/* Settings rows — dark */
+html[data-theme="desktop-glass"] .settings-item {
+  background: rgba(40, 35, 78, 0.7) !important;
+  border: 1px solid rgba(167, 139, 250, 0.25) !important;
+}
+
+/* Cards — dark glass */
+html[data-theme="desktop-glass"] .qr-card,
+html[data-theme="desktop-glass"] .da-card,
+html[data-theme="desktop-glass"] .chat-preview-panel,
+html[data-theme="desktop-glass"] .wi-opt,
+html[data-theme="desktop-glass"] .modal {
+  background: rgba(32, 27, 65, 0.78) !important;
+  border: 1px solid rgba(167, 139, 250, 0.28) !important;
+  color: #F4F1FF !important;
+}
+html[data-theme="desktop-glass"] .modal label,
+html[data-theme="desktop-glass"] .modal .modal-title { color: #E8E0FF !important; }
+html[data-theme="desktop-glass"] .modal input,
+html[data-theme="desktop-glass"] .modal textarea,
+html[data-theme="desktop-glass"] .modal select {
+  background: rgba(255,255,255,0.08) !important;
+  border: 1px solid rgba(139,92,246,0.35) !important;
+  color: #F4F1FF !important;
+}
+/* rui-glass-overlay / rui-glass-dialog — 关于、知识库选择弹窗 */
+html[data-theme="desktop-glass"] .rui-glass-overlay {
+  background: rgba(15, 12, 35, 0.55) !important;
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+html[data-theme="desktop-glass"] .rui-glass-dialog {
+  background: rgba(32, 27, 65, 0.85) !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  color: #F4F1FF !important;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45) !important;
+}
+html[data-theme="desktop-glass"] .rui-glass-dialog h3,
+html[data-theme="desktop-glass"] .rui-glass-dialog h4 { color: #E8E0FF !important; }
+html[data-theme="desktop-glass"] .rui-glass-dialog .muted { color: #B8B4D3 !important; }
+
+/* Context menu — dark glass, no white flash */
+html[data-theme="desktop-glass"] .ctx-menu {
+  background: rgba(30, 27, 75, 0.92) !important;
+  border: 1px solid rgba(167, 139, 250, 0.3) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4) !important;
+}
+html[data-theme="desktop-glass"] .ctx-menu button {
+  color: #E8E0FF !important;
+}
+html[data-theme="desktop-glass"] .ctx-menu button:hover {
+  background: rgba(139, 92, 246, 0.25) !important;
+  color: #C4B5FD !important;
+}
+
+/* Section titles — purple tinted */
+html[data-theme="desktop-glass"] .wr-section-title {
+  color: #C4B5FD !important;
+  background: rgba(139, 92, 246, 0.12) !important;
+  border-bottom: 1px solid rgba(167, 139, 250, 0.2) !important;
+}
+
+/* ===== Issue 1: Chat bubbles — dark glass ===== */
+html[data-theme="desktop-glass"] .bubble {
+  color: #F4F1FF !important;
+}
+html[data-theme="desktop-glass"] .bubble-me {
+  background: rgba(75, 62, 135, 0.78) !important;
+  border: 1px solid rgba(167, 139, 250, 0.35) !important;
+  color: #F4F1FF !important;
+}
+html[data-theme="desktop-glass"] .bubble-other {
+  background: rgba(36, 43, 79, 0.88) !important;
+  border: 1px solid rgba(120, 130, 200, 0.3) !important;
+  color: #F4F1FF !important;
+}
+html[data-theme="desktop-glass"] .bubble .muted {
+  color: #B8B4D3 !important;
+  opacity: 0.85 !important;
+}
+/* chat-history page background override */
+html[data-theme="desktop-glass"] body.page-chat-history {
+  background: transparent !important;
+}
+
+/* ===== Issue 2: Header resync & settings — clean no circle ===== */
+html[data-theme="desktop-glass"] #header-resync {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  color: #CFC6E8 !important;
+  box-shadow: none !important;
+  width: 30px !important;
+  height: 30px !important;
+  margin: 0 2px 0 0 !important;
+}
+html[data-theme="desktop-glass"] #header-resync:hover {
+  background: rgba(139, 92, 246, 0.25) !important;
+  color: #fff !important;
+}
+html[data-theme="desktop-glass"] #header-settings {
+  background: transparent !important;
+  border: none !important;
+  color: #CFC6E8 !important;
+}
+html[data-theme="desktop-glass"] #header-settings:hover {
+  background: rgba(139, 92, 246, 0.25) !important;
+  color: #fff !important;
+}
+
+/* ===== Issue 3: Chat preview text ===== */
+html[data-theme="desktop-glass"] .chat-preview-msg {
+  color: #F4F1FF !important;
+}
+html[data-theme="desktop-glass"] .chat-preview-who {
+  color: #A78BFA !important;
+  font-weight: 600 !important;
+}
+
+/* ===== Issue 4: Detail analysis "生成分析" — calmer gradient ===== */
+html[data-theme="desktop-glass"] #da-generate.primary,
+html[data-theme="desktop-glass"] #da-generate {
+  background: linear-gradient(135deg, #6D5BD0 0%, #5B5BD6 100%) !important;
+  border: 1px solid rgba(180, 165, 255, 0.3) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 3px 12px rgba(109, 91, 208, 0.3) !important;
+  color: #fff !important;
+}
+html[data-theme="desktop-glass"] #da-generate:hover {
+  background: linear-gradient(135deg, #7D6BE0 0%, #6B6BE6 100%) !important;
+  filter: brightness(1.06);
+}
+
+/* ===== Issue 6: Perspective card — deep purple glass ===== */
+html[data-theme="desktop-glass"] .qr-short-analysis {
+  background: rgba(40, 32, 80, 0.7) !important;
+  border: 1px solid rgba(139, 92, 246, 0.25) !important;
+}
+html[data-theme="desktop-glass"] .qr-short-analysis h3 {
+  color: #C4B5FD !important;
+}
+html[data-theme="desktop-glass"] .qr-short-analysis .sa-body {
+  color: #D8D0F0 !important;
+}
+html[data-theme="desktop-glass"] .qr-short-analysis .sa-toggle {
+  color: #A78BFA !important;
+}
+
+/* ===== Theme picker sub-page dark cards ===== */
+html[data-theme="desktop-glass"] .theme-option-card {
+  background: rgba(40, 35, 78, 0.7) !important;
+  border: 1px solid rgba(167, 139, 250, 0.25) !important;
+  color: #EDE8F8 !important;
+}
+html[data-theme="desktop-glass"] .theme-option-card.active {
+  border: 1.5px solid #8B5CF6 !important;
+  background: rgba(60, 48, 110, 0.8) !important;
+}
+
+/* ===== Custom dropdown (ex-add-type) ===== */
+.ex-dd-item {
+  padding: 8px 12px; font-size: 12px; cursor: pointer; color: #E8E0FF;
+}
+.ex-dd-item:hover { background: rgba(139,92,246,0.25); }
+.ex-dd-item.selected { background: rgba(139,92,246,0.35); color: #fff; }

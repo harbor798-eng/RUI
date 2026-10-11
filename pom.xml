@@ -135,6 +135,18 @@
             <artifactId>jna-platform</artifactId>
             <version>5.14.0</version>
         </dependency>
+
+        <!-- JCEF local native runtime (prototype) -->
+        <dependency>
+            <groupId>me.friwi</groupId>
+            <artifactId>jcefmaven</artifactId>
+            <version>152.0.6</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.11.0</version>
+        </dependency>
     </dependencies>
 
     <build>

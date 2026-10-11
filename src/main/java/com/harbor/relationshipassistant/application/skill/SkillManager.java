@@ -26,11 +26,16 @@ public final class SkillManager {
     private final SkillRegistry registry = new SkillRegistry();
     private final DebounceScheduler debounce = new DebounceScheduler();
     private final Map<Path, SkillRuntimeState> runtimeStates = new ConcurrentHashMap<>();
+    private volatile SkillEnablementStore enablement;
 
     public SkillManager(Path skillsRoot, SkillLoader loader) {
         this.skillsRoot = Objects.requireNonNull(skillsRoot, "skillsRoot");
         this.loader = Objects.requireNonNull(loader, "loader");
     }
+
+    public void setEnablementStore(SkillEnablementStore store) { this.enablement = store; }
+
+    public SkillEnablementStore getEnablementStore() { return enablement; }
 
     public SkillRegistry getRegistry() { return registry; }
 
@@ -142,15 +147,37 @@ public final class SkillManager {
         return runtimeStates.get(skillDirectory.toAbsolutePath().normalize());
     }
 
-    /** 当前所有 READY Skill 的不可修改快照。 */
+    /** 当前所有 READY Skill 的不可修改快照。已停用的 Skill 不在此列表中。 */
     public List<SkillDescriptor> getReadySkills() {
         List<SkillDescriptor> all = registry.getAll();
-        log.info("[SKILL-REGISTRY] getAll size={}", all.size());
-        return all;
+        List<SkillDescriptor> out = new java.util.ArrayList<>();
+        for (SkillDescriptor d : all) {
+            if (enablement != null && !enablement.isEnabled(d.getName())) continue;
+            out.add(d);
+        }
+        log.info("[SKILL-REGISTRY] getAll size={} visible={}", all.size(), out.size());
+        return out;
+    }
+
+    /** 包含停用 Skill 的完整列表（用于管理页展示，带 enabled 标志）。 */
+    public List<SkillDescriptor> getAllSkillsIncludingDisabled() {
+        return registry.getAll();
+    }
+
+    public boolean isEnabled(String name) {
+        return enablement == null || enablement.isEnabled(name);
+    }
+
+    public void setEnabled(String name, boolean enabled) {
+        if (enablement != null) enablement.setEnabled(name, enabled);
     }
 
     public Optional<SkillDescriptor> getSkill(String name) {
         if (name == null || name.isBlank()) return Optional.empty();
+        if (enablement != null && !enablement.isEnabled(name)) {
+            log.info("[SKILL-REGISTRY] get name={} disabled, refusing", name);
+            return Optional.empty();
+        }
         SkillDescriptor d = registry.getByName(name);
         log.info("[SKILL-REGISTRY] get name={} found={}", name, d != null);
         return Optional.ofNullable(d);

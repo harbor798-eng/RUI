@@ -8,13 +8,18 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Detailed Analysis Function Output Adapter:
  * AnalysisResult.content (JSON) → UI-friendly DetailedAnalysisResult.
  *
- * Phase 22: extended with emotions / facts / inferences / confidence / recommendation.action / selfCare.
- * Backward compat: legacy "evidence" is folded into "facts"; legacy string recommendation is kept optional.
+ * Handles:
+ * - Flat JSON with summary/facts/emotions at root.
+ * - {items:[{summary,...}]} wrapper.
+ * - JSON wrapped in code fences with leading/trailing prose.
+ * - Truncated/malformed JSON: attempts lenient extraction.
  */
 public final class DetailedAnalysisAdapter {
     private static final Logger log = LoggerFactory.getLogger(DetailedAnalysisAdapter.class);
@@ -41,26 +46,38 @@ public final class DetailedAnalysisAdapter {
         if (result == null) throw new IllegalArgumentException("AnalysisResult is required");
         String raw = result.getContent() == null ? "" : result.getContent().trim();
         raw = stripCodeFence(raw);
-        JsonNode root;
-        try {
-            root = M.readTree(raw);
-        } catch (Exception e) {
-            // 4.19-D.1: 自然连续文本 fallback —— 不抛 JSON 错误，整段作为 reportMarkdown 交付。
-            log.info("[DETAIL-ADAPTER] non-JSON content, falling back to raw text. len={}", raw.length());
-            return new Result(
-                    "",
-                    List.of(), List.of(),
-                    List.of(), List.of(),
-                    List.of(),
-                    new Recommendation("", ""),
-                    new SelfCare(false, ""),
-                    raw,
-                    result.getModel(),
-                    result.getCreatedAt() == null ? "" : result.getCreatedAt().toString());
+
+        JsonNode root = tryParse(raw);
+        if (root == null || !root.isObject()) {
+            // 3) Last resort: try extracting JSON substring from first { to last }
+            String extracted = extractJsonObject(raw);
+            if (extracted != null) {
+                root = tryParse(extracted);
+            }
         }
         if (root == null || !root.isObject()) {
-            // 4.19-D.1: 顶层不是 JSON object（例如直接是数组/字符串），同样 fallback 为连续文本。
-            log.info("[DETAIL-ADAPTER] root is not a JSON object, falling back to raw text.");
+            log.info("[DETAIL-ADAPTER] cannot parse as JSON after all attempts. len={}", raw.length());
+            // Try regex extraction even when JSON can't be parsed at all
+            String extractedSummary = extractStringField(raw, "summary");
+            String extractedText = extractStringField(raw, "text");
+            if (!extractedSummary.isEmpty() || !extractedText.isEmpty()) {
+                log.info("[DETAIL-ADAPTER] recovered fields via regex: summaryLen={} textLen={}",
+                        extractedSummary.length(), extractedText.length());
+                return new Result(
+                        extractedSummary,
+                        List.of(), List.of(),
+                        List.of(), List.of(),
+                        List.of(),
+                        new Recommendation("", ""),
+                        new SelfCare(false, ""),
+                        extractedText.isEmpty() ? extractedSummary : extractedText,
+                        result.getModel(),
+                        result.getCreatedAt() == null ? "" : result.getCreatedAt().toString());
+            }
+            String degraded = raw;
+            if (raw.trim().startsWith("{")) {
+                degraded = "（模型输出格式异常，无法解析结构化报告。请重新生成分析。）";
+            }
             return new Result(
                     "",
                     List.of(), List.of(),
@@ -68,35 +85,61 @@ public final class DetailedAnalysisAdapter {
                     List.of(),
                     new Recommendation("", ""),
                     new SelfCare(false, ""),
-                    raw,
+                    degraded,
                     result.getModel(),
                     result.getCreatedAt() == null ? "" : result.getCreatedAt().toString());
         }
+
         String summary = root.path("summary").asText("").trim();
         String report = root.path("reportMarkdown").asText("").trim();
         if (report.isEmpty()) report = root.path("text").asText("").trim();
+
+        // Unwrap items[0] if root fields are empty
         if (summary.isEmpty() && report.isEmpty()) {
-            // 4.19-D.1: 合法 JSON 但缺 summary/reportMarkdown，不抛错；把整个 raw 作为 reportMarkdown。
-            log.info("[DETAIL-ADAPTER] JSON object missing summary/reportMarkdown, using raw as reportMarkdown.");
-            return new Result(
-                    "",
-                    List.of(), List.of(),
-                    List.of(), List.of(),
-                    List.of(),
-                    new Recommendation("", ""),
-                    new SelfCare(false, ""),
-                    raw,
-                    result.getModel(),
-                    result.getCreatedAt() == null ? "" : result.getCreatedAt().toString());
+            JsonNode items = root.path("items");
+            if (items != null && items.isArray() && !items.isEmpty() && items.get(0).isObject()) {
+                JsonNode item = items.get(0);
+                String s2 = item.path("summary").asText("").trim();
+                String r2 = item.path("reportMarkdown").asText("").trim();
+                if (r2.isEmpty()) r2 = item.path("text").asText("").trim();
+                if (!s2.isEmpty() || !r2.isEmpty()) {
+                    log.info("[DETAIL-ADAPTER] unwrapped items[0] from model response");
+                    root = item;
+                    summary = s2;
+                    report = r2;
+                }
+            }
+        }
+
+        if (summary.isEmpty() && report.isEmpty()) {
+            // Last resort: try regex extraction from malformed JSON text
+            String extractedText = extractStringField(raw, "text");
+            String extractedSummary = extractStringField(raw, "summary");
+            if (!extractedSummary.isEmpty()) summary = extractedSummary;
+            if (report.isEmpty() && !extractedText.isEmpty()) report = extractedText;
+
+            if (summary.isEmpty() && report.isEmpty()) {
+                log.info("[DETAIL-ADAPTER] JSON object missing all fields. len={}", raw.length());
+                String degraded = raw.trim().startsWith("{")
+                        ? "（模型输出格式异常，无法解析结构化报告。请重新生成分析。）"
+                        : raw;
+                return new Result(
+                        "",
+                        List.of(), List.of(),
+                        List.of(), List.of(),
+                        List.of(),
+                        new Recommendation("", ""),
+                        new SelfCare(false, ""),
+                        degraded,
+                        result.getModel(),
+                        result.getCreatedAt() == null ? "" : result.getCreatedAt().toString());
+            }
         }
 
         List<Emotion> meEmotions = parseEmotions(root.path("emotions").path("me"));
         List<Emotion> otherEmotions = parseEmotions(root.path("emotions").path("other"));
-
-        // facts: prefer new "facts"; fall back to legacy "evidence"
         List<String> facts = parseStringList(root.path("facts"));
         if (facts.isEmpty()) facts = parseStringList(root.path("evidence"));
-
         List<String> inferences = parseStringList(root.path("inferences"));
 
         List<Possibility> possibilities = new ArrayList<>();
@@ -118,7 +161,6 @@ public final class DetailedAnalysisAdapter {
             String reason = recNode.path("reason").asText("").trim();
             rec = new Recommendation(action, reason);
         } else {
-            // legacy string form
             rec = new Recommendation("", recNode.asText("").trim());
         }
 
@@ -135,6 +177,51 @@ public final class DetailedAnalysisAdapter {
                 possibilities, rec, sc, report,
                 result.getModel(),
                 result.getCreatedAt() == null ? "" : result.getCreatedAt().toString());
+    }
+
+    private static JsonNode tryParse(String s) {
+        try {
+            return M.readTree(s);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Extract substring from first { to last } for truncated JSON. */
+    private static String extractJsonObject(String s) {
+        int start = s.indexOf('{');
+        int end = s.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return s.substring(start, end + 1);
+        }
+        return null;
+    }
+
+    /** Leniently extract a JSON string field value via regex. Handles truncated strings. */
+    private static String extractStringField(String json, String field) {
+        // Normal: "field": "value"
+        Pattern p = Pattern.compile("\"" + field + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+        Matcher m = p.matcher(json);
+        if (m.find()) {
+            return unescape(m.group(1));
+        }
+        // Truncated: "field": "value without closing quote
+        Pattern p2 = Pattern.compile("\"" + field + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\\s*[,}\\n]");
+        Matcher m2 = p2.matcher(json);
+        if (m2.find()) {
+            return unescape(m2.group(1));
+        }
+        // Mid-string truncation: "field": "value... (no closing, no trailing delimiter)
+        Pattern p3 = Pattern.compile("\"" + field + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\\s*$");
+        Matcher m3 = p3.matcher(json);
+        if (m3.find()) {
+            return unescape(m3.group(1));
+        }
+        return "";
+    }
+
+    private static String unescape(String s) {
+        return s.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
     }
 
     private static List<Emotion> parseEmotions(JsonNode arr) {
@@ -159,14 +246,26 @@ public final class DetailedAnalysisAdapter {
         return out;
     }
 
-    private static String stripCodeFence(String s) {
+    /**
+     * Strip code fences. Handles both:
+     * - String starting with ``` fences
+     * - String with leading prose before the first ``` fence
+     * - Multiple fence blocks (takes the largest JSON-looking block)
+     */
+    static String stripCodeFence(String s) {
         if (s == null) return "";
         String t = s.trim();
-        if (t.startsWith("```")) {
-            int nl = t.indexOf('\n');
-            if (nl >= 0) t = t.substring(nl + 1);
-            if (t.endsWith("```")) t = t.substring(0, t.length() - 3);
-        }
-        return t.trim();
+        // Find first ``` and last ```
+        int first = t.indexOf("```");
+        if (first < 0) return t;
+        int afterFirst = t.indexOf('\n', first);
+        if (afterFirst < 0) return t;
+        int last = t.lastIndexOf("```");
+        if (last <= afterFirst) return t;
+        String inner = t.substring(afterFirst + 1, last).trim();
+        // If the inner content looks like JSON (starts with { or [), use it
+        if (inner.startsWith("{") || inner.startsWith("[")) return inner;
+        // Otherwise, return the original trimmed string (might be plain text)
+        return t;
     }
 }

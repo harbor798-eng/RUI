@@ -97,6 +97,27 @@ public class MainController {
             profileHttpServer.setRelationshipRepository(relRepo);
             profileHttpServer.setDeepReportService(reportService);
             profileHttpServer.setChatMessageRepository(chatRepo);
+            // Wire DistillationService
+            try {
+                var distillSkillsRoot = java.nio.file.Paths.get("skills").toAbsolutePath().normalize();
+                var distillService = new com.harbor.relationshipassistant.application.distill.DistillationService(
+                        chatRepo, relRepo, provider, distillSkillsRoot);
+                profileHttpServer.setDistillationService(distillService);
+                log.info("[JEVE][Bootstrap] DistillationService injected: true");
+                // Wire ExDistillService (前任 Skill，基于 ex-skill-main)
+                try {
+                    var exMaterialSource = new com.harbor.relationshipassistant.application.distill.ExMaterialSource(chatRepo);
+                    var exPublisher = new com.harbor.relationshipassistant.application.distill.ExSkillPublisher(distillSkillsRoot);
+                    var exDistillService = new com.harbor.relationshipassistant.application.distill.ExDistillService(
+                            provider, exMaterialSource, exPublisher);
+                    profileHttpServer.setExDistillService(exDistillService);
+                    log.info("[JEVE][Bootstrap] ExDistillService injected: true");
+                } catch (Exception exDistillEx) {
+                    log.warn("[JEVE][Bootstrap] ExDistillService wiring failed: {}", exDistillEx.toString());
+                }
+            } catch (Exception distillEx) {
+                log.warn("[JEVE][Bootstrap] DistillationService wiring failed: {}", distillEx.toString());
+            }
             // Phase 1: DatabaseMessageSource wiring
             try {
                 com.harbor.relationshipassistant.common.config.AppConfig cfg0 =
@@ -137,9 +158,17 @@ public class MainController {
 
             log.info("[JEVE][WebView] Initializing WebView...");
             javafx.scene.web.WebView webView = new javafx.scene.web.WebView();
+            webView.setStyle("-fx-background-color: transparent;");
+            webView.setPageFill(javafx.scene.paint.Color.WHITE); // Classic default
+            // Explicitly set all containers transparent (FXML inline styles may not apply reliably)
+            contentArea.setStyle("-fx-background-color: transparent; -fx-padding: 0;");
+            if (contentArea.getParent() instanceof javafx.scene.layout.Region parentRegion) {
+                parentRegion.setStyle("-fx-background-color: transparent;");
+                log.info("[JEVE][WebView] parent region set transparent: {}", parentRegion.getClass().getSimpleName());
+            }
             javafx.scene.web.WebEngine engine = webView.getEngine();
             engine.setOnAlert(e -> log.info("[WebView][JS][alert] {}", e.getData()));
-            DesktopBridge bridge = new DesktopBridge(stage);
+            DesktopBridge bridge = new DesktopBridge(stage, webView);
             // Wire WebView 采集开关 to the real RealtimeCaptureService (PrintWindow + OCR + SQLite).
             try {
                 final com.harbor.relationshipassistant.common.config.AppConfig cfg =
@@ -179,17 +208,94 @@ public class MainController {
                 }
                 else if (newS == javafx.concurrent.Worker.State.FAILED) log.warn("[JEVE][WebView] Load failed");
             });
-            log.info("[JEVE][WebView] Loading: http://127.0.0.1:18080/index.html");
-            engine.load("http://127.0.0.1:18080/index.html");
+            String startPage = System.getProperty("rui.testPage", "/index.html");
+            log.info("[JEVE][WebView] Loading: http://127.0.0.1:18080{}", startPage);
+            engine.load("http://127.0.0.1:18080" + startPage);
             contentArea.getChildren().setAll(webView);
             AnchorPane.setTopAnchor(webView, 0.0);
             AnchorPane.setBottomAnchor(webView, 0.0);
             AnchorPane.setLeftAnchor(webView, 0.0);
             AnchorPane.setRightAnchor(webView, 0.0);
 
+            // ---- Native drag overlay: Region on top of WebView header area ----
+            // WebView does not generate MOUSE_DRAGGED in transparent Stage, and JS mousemove
+            // is unreliable. A JavaFX Region placed above WebView receives mouse events directly.
+            // NOTE: fully transparent (alpha=0) Region does not receive mouse events even with
+            // pickOnBounds=true; use a near-invisible 1% black fill to enable hit testing.
+            final DesktopBridge dragBridge = bridge;
+            javafx.scene.layout.Region dragOverlay = new javafx.scene.layout.Region();
+            dragOverlay.setStyle("-fx-background-color: rgba(0,0,0,0.01);");
+            dragOverlay.setPickOnBounds(true);
+            dragOverlay.setMouseTransparent(false);
+            dragOverlay.setPrefHeight(48.0);
+            AnchorPane.setTopAnchor(dragOverlay, 0.0);
+            AnchorPane.setLeftAnchor(dragOverlay, 36.0);
+            AnchorPane.setRightAnchor(dragOverlay, 120.0); // 350-230: covers header center, excludes back btn and right btns
+            contentArea.getChildren().add(dragOverlay);
+
+            final double[] overlayOffset = new double[2];
+            dragOverlay.setOnMousePressed(e -> {
+                if (!e.isPrimaryButtonDown()) return;
+                overlayOffset[0] = e.getScreenX() - stage.getX();
+                overlayOffset[1] = e.getScreenY() - stage.getY();
+                log.info("[WindowDiag][Overlay] drag start offset=({},{}) stage=({},{})",
+                    overlayOffset[0], overlayOffset[1], stage.getX(), stage.getY());
+                e.consume();
+            });
+            dragOverlay.setOnMouseDragged(e -> {
+                if (!e.isPrimaryButtonDown()) return;
+                double nx = e.getScreenX() - overlayOffset[0];
+                double ny = e.getScreenY() - overlayOffset[1];
+                stage.setX(nx);
+                stage.setY(ny);
+                e.consume();
+            });
+            dragOverlay.setOnMouseReleased(e -> {
+                log.info("[WindowDiag][Overlay] drag end stage=({},{})", stage.getX(), stage.getY());
+                overlayOffset[0] = 0;
+                overlayOffset[1] = 0;
+                e.consume();
+                // Trigger edge docking check (same as JS endDrag)
+                try { dragBridge.endDrag(); } catch (Exception ignored) {}
+            });
+            log.info("[WindowDiag][Overlay] drag overlay registered at header area (36..230, 0..48)");
+
+            // ---- Window drag: scene-level event filter on header area ----
+            // WebView consumes mouse events, so we intercept at scene level (capturing phase).
+            // Header is top 48px; skip left back button (x<36) and right buttons (x>230).
+            final double[] dragOffset = new double[2];
+            final boolean[] dragging = {false};
+            webView.sceneProperty().addListener((obs, oldScene, newScene) -> {
+                if (newScene == null) return;
+                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
+                    double y = e.getSceneY();
+                    double x = e.getSceneX();
+                    if (e.isPrimaryButtonDown() && y < 48 && x > 36 && x < 230) {
+                        dragging[0] = true;
+                        dragOffset[0] = e.getScreenX() - stage.getX();
+                        dragOffset[1] = e.getScreenY() - stage.getY();
+                        log.info("[WindowDiag][FX] scene drag start x={} y={} offset=({},{})", x, y, dragOffset[0], dragOffset[1]);
+                    }
+                });
+                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_DRAGGED, e -> {
+                    if (dragging[0] && e.isPrimaryButtonDown()) {
+                        double newX = e.getScreenX() - dragOffset[0];
+                        double newY = e.getScreenY() - dragOffset[1];
+                        stage.setX(newX);
+                        stage.setY(newY);
+                        log.info("[WindowDiag][FX] scene drag move to ({},{})", newX, newY);
+                    }
+                });
+                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e -> {
+                    dragging[0] = false;
+                });
+                log.info("[WindowDiag][FX] scene drag filters registered");
+            });
+
             // ---- WindowDiag: event filters on WebView ----
-            webView.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e ->
-                log.info("[WindowDiag][JavaFX] WebView MOUSE_PRESSED sceneX={} sceneY={}", e.getSceneX(), e.getSceneY()));
+            webView.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
+                log.info("[WindowDiag][JavaFX] WebView MOUSE_PRESSED sceneX={} sceneY={}", e.getSceneX(), e.getSceneY());
+            });
             webView.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e ->
                 log.info("[WindowDiag][JavaFX] WebView MOUSE_RELEASED sceneX={} sceneY={}", e.getSceneX(), e.getSceneY()));
             webView.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_CLICKED, e ->

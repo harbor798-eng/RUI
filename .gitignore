@@ -48,6 +48,8 @@ mysql_backup_pre_sqlite.sql
 
 # ---- Development isolation area ----
 DEL/
+Del/
+del/
 
 # ---- Python cache ----
 __pycache__/
@@ -58,5 +60,21 @@ __pycache__/
 skills.zip
 src/main/resources/prompts.zip
 wechatapi-main/
-del/
 ai/
+jogl-decomp/
+
+# ---- JCEF native runtime (probe-only, not needed for distribution) ----
+jcef-install/
+jcef-bundle/
+Windows-amd64.tar.gz
+
+# ---- Runtime temp / diagnostic artifacts ----
+.rui-staging/
+.diag_skills.json
+diagnostics/
+
+# ---- Local Skill enablement state (user config) ----
+skills/.enabled.json
+
+# ---- Original ex-skill download copy (resources already in src/main/resources/exskill/) ----
+ex-skill-main/

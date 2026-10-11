@@ -1,13 +1,11 @@
-# 本地配置模板：复制为 application-local.properties 后填入真实密码。
+# 本地配置模板：复制为 application-local.properties 后填入真实配置。
 # application-local.properties 不提交、不打印、不写日志。
-db.url=jdbc:mysql://localhost:3306/relationship_assistant?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-db.username=root
-db.password=在这里填写你的root密码
+#
+# 默认使用 SQLite（data/jeve.db，自动建表），无需数据库配置。
+# 如需覆盖，可在此设置：
+# db.url=jdbc:sqlite:data/jeve.db
 
-# Optional: path to Python 3.9+ executable (with wechatauto-replica installed).
+# Optional: path to Python 3.9+ executable (for wechat export parsing).
 # Windows paths in .properties MUST use forward slashes "/" — single backslash
-# gets eaten by the Java Properties parser. Do NOT write C:\path\to\python.exe.
-# Example:
+# gets eaten by the Java Properties parser.
 # python.executable=C:/Users/You/AppData/Local/Programs/Python/Python311/python.exe
-# python.executable=
-

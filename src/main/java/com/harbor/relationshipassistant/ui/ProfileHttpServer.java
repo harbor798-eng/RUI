@@ -44,6 +44,8 @@ public class ProfileHttpServer {
     private volatile com.harbor.relationshipassistant.application.skill.adapter.SkillAdapter skillAdapter;
     private volatile com.harbor.relationshipassistant.application.systemhost.SystemHostPlanner systemHostPlanner;
     private volatile com.harbor.relationshipassistant.application.wechat.WechatImportService wechatImportService;
+    private volatile com.harbor.relationshipassistant.application.distill.DistillationService distillationService;
+    private volatile com.harbor.relationshipassistant.application.distill.ExDistillService exDistillService;
 
     // Phase 1: DatabaseMessageSource config
     private volatile String dbUrl, dbUser, dbPass;
@@ -107,6 +109,8 @@ public class ProfileHttpServer {
     public void setSkillManager(com.harbor.relationshipassistant.application.skill.SkillManager s) { this.skillManager = s; }
     public void setSkillAdapter(com.harbor.relationshipassistant.application.skill.adapter.SkillAdapter a) { this.skillAdapter = a; }
     public void setSystemHostPlanner(com.harbor.relationshipassistant.application.systemhost.SystemHostPlanner p) { this.systemHostPlanner = p; }
+    public void setDistillationService(com.harbor.relationshipassistant.application.distill.DistillationService s) { this.distillationService = s; }
+    public void setExDistillService(com.harbor.relationshipassistant.application.distill.ExDistillService s) { this.exDistillService = s; }
 
     public void setAnalysisApplicationService(
             com.harbor.relationshipassistant.application.analysis.AnalysisApplicationService app,
@@ -649,24 +653,140 @@ public class ProfileHttpServer {
                     StringBuilder sb = new StringBuilder();
                     sb.append("{\"success\":true,\"skills\":[");
                     boolean first = true;
-                    // Built-in system skill
+                    // Built-in system skill (always enabled)
                     sb.append("{\"name\":\"").append(com.harbor.relationshipassistant.application.systemhost.BuiltInSkills.DEFAULT_THREE_STRATEGY_NAME)
                       .append("\",\"description\":\"RUI 内置三策略：自然 / 主动 / 轻微暧昧，各 3 条可直接发送的回复。\"")
-                      .append(",\"kind\":\"SYSTEM\"}");
+                      .append(",\"kind\":\"SYSTEM\",\"enabled\":true}");
                     first = false;
                     if (skillManager != null) {
-                        for (var s : skillManager.getReadySkills()) {
+                        for (var s : skillManager.getAllSkillsIncludingDisabled()) {
                             if (!first) sb.append(',');
                             first = false;
+                            boolean en = skillManager.isEnabled(s.getName());
                             sb.append("{\"name\":\"").append(esc(s.getName()));
                             sb.append("\",\"description\":\"").append(esc(s.getDescription() == null ? "" : s.getDescription()));
-                            sb.append("\",\"kind\":\"USER\"}");
+                            sb.append("\",\"kind\":\"USER\"");
+                            sb.append(",\"enabled\":").append(en);
+                            sb.append("}");
                         }
                     }
                     sb.append("]}");
                     sendJson(ex, 200, sb.toString());
                 } catch (Exception e) {
                     log.error("/api/skills failed: {}", e.toString());
+                    sendJson(ex, 200, "{\"success\":false,\"error\":\"" + esc(e.getMessage()) + "\"}");
+                }
+            } else if (path.matches("^/api/skills/[^/]+/(enable|disable)$") && "POST".equals(ex.getRequestMethod())) {
+                // /api/skills/{name}/enable or /disable
+                try {
+                    String[] parts = path.split("/");
+                    String skillName = java.net.URLDecoder.decode(parts[3], "UTF-8");
+                    String action = parts[4];
+                    if (skillManager == null) {
+                        sendJson(ex, 503, "{\"success\":false,\"error\":\"skillManager not ready\"}");
+                        return;
+                    }
+                    // Don't allow toggling the built-in default
+                    if (skillName.equals(com.harbor.relationshipassistant.application.systemhost.BuiltInSkills.DEFAULT_THREE_STRATEGY_NAME)) {
+                        sendJson(ex, 200, "{\"success\":false,\"error\":\"内置 Skill 不可停用\"}");
+                        return;
+                    }
+                    boolean enable = "enable".equals(action);
+                    skillManager.setEnabled(skillName, enable);
+                    log.info("/api/skills/{}/{} -> {}", skillName, action, enable);
+                    sendJson(ex, 200, "{\"success\":true,\"name\":\"" + esc(skillName) + "\",\"enabled\":" + enable + "}");
+                } catch (Exception e) {
+                    log.error("/api/skills toggle failed: {}", e.toString());
+                    sendJson(ex, 200, "{\"success\":false,\"error\":\"" + esc(e.getMessage()) + "\"}");
+                }
+            } else if (path.equals("/api/distill") && "POST".equals(ex.getRequestMethod())) {
+                if (distillationService == null) {
+                    sendJson(ex, 503, "{\"success\":false,\"error\":\"distillation service not wired\"}");
+                    return;
+                }
+                try {
+                    String rawBody = readBody(ex);
+                    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    var root = mapper.readTree(rawBody);
+                    String mode = root.path("mode").asText("OTHER");
+                    long relId = root.path("relationshipId").asLong(0);
+                    String targetName = root.path("targetName").asText("");
+                    String action = root.path("action").asText("CREATE_NEW");
+                    String role = root.path("relationshipRole").asText("");
+                    String customNote = root.path("customNote").asText("");
+                    var traits = new java.util.LinkedHashMap<String, com.harbor.relationshipassistant.application.distill.DistillationService.TraitAdj>();
+                    var traitsNode = root.path("traits");
+                    if (traitsNode.isObject()) {
+                        var fields = traitsNode.fields();
+                        while (fields.hasNext()) {
+                            var f = fields.next();
+                            String name = f.getKey();
+                            boolean enabled = f.getValue().path("enabled").asBoolean(false);
+                            int value = f.getValue().path("value").asInt(5);
+                            if (value < 1) value = 1;
+                            if (value > 10) value = 10;
+                            traits.put(name, new com.harbor.relationshipassistant.application.distill.DistillationService.TraitAdj(enabled, value));
+                        }
+                    }
+                    log.info("[DISTILL] request mode={} relId={} target={} action={} role={} traits={}", mode, relId, targetName, action, role, traits);
+                    var result = distillationService.distill(
+                            new com.harbor.relationshipassistant.application.distill.DistillationService.DistillRequest(
+                                    mode, relId, targetName, action, role, traits, customNote));
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("{\"success\":").append(result.success());
+                    sb.append(",\"skillName\":\"").append(esc(result.skillName() == null ? "" : result.skillName()));
+                    sb.append("\",\"skillDir\":\"").append(esc(result.skillDir() == null ? "" : result.skillDir()));
+                    sb.append("\",\"message\":\"").append(esc(result.message()));
+                    sb.append("\",\"sampleCount\":").append(result.sampleCount());
+                    sb.append(",\"usedSampleCount\":").append(result.usedSampleCount());
+                    sb.append('}');
+                    sendJson(ex, 200, sb.toString());
+                } catch (Exception e) {
+                    log.error("/api/distill failed: {}", e.toString(), e);
+                    sendJson(ex, 200, "{\"success\":false,\"error\":\"" + esc(e.getMessage()) + "\"}");
+                }
+            } else if (path.equals("/api/distill-ex") && "POST".equals(ex.getRequestMethod())) {
+                if (exDistillService == null) {
+                    sendJson(ex, 503, "{\"success\":false,\"error\":\"ex distill service not wired\"}");
+                    return;
+                }
+                try {
+                    String rawBody = readBody(ex);
+                    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    var root = mapper.readTree(rawBody);
+                    long relId = root.path("relationshipId").asLong(0);
+                    String nickname = root.path("nickname").asText("");
+                    String relDesc = root.path("relationshipDesc").asText("");
+                    String tags = root.path("personalityTags").asText("");
+
+                    // 解析材料列表：优先 materials 数组，兼容旧 wechatExportPath 字段
+                    java.util.List<com.harbor.relationshipassistant.application.distill.ExMaterialInput> materials =
+                            new java.util.ArrayList<>();
+                    if (root.has("materials") && root.path("materials").isArray()) {
+                        for (var node : root.path("materials")) {
+                            String t = node.path("type").asText("DB");
+                            String p = node.path("path").asText("");
+                            materials.add(new com.harbor.relationshipassistant.application.distill.ExMaterialInput(t, p));
+                        }
+                    } else if (root.has("wechatExportPath") && !root.path("wechatExportPath").asText("").isBlank()) {
+                        materials.add(new com.harbor.relationshipassistant.application.distill.ExMaterialInput(
+                                "WECHAT_FILE", root.path("wechatExportPath").asText()));
+                    }
+                    if (materials.isEmpty()) materials.add(com.harbor.relationshipassistant.application.distill.ExMaterialInput.db());
+
+                    log.info("/api/distill-ex relId={} nickname={} materials={}", relId, nickname, materials);
+                    var result = exDistillService.distill(new com.harbor.relationshipassistant.application.distill.ExDistillService.ExRequest(
+                            relId, nickname, relDesc, tags, materials));
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("{\"success\":").append(result.success());
+                    sb.append(",\"slug\":\"").append(esc(result.slug() == null ? "" : result.slug()));
+                    sb.append("\",\"skillDir\":\"").append(esc(result.skillDir() == null ? "" : result.skillDir()));
+                    sb.append("\",\"message\":\"").append(esc(result.message()));
+                    sb.append("\",\"materialCount\":").append(result.materialCount());
+                    sb.append('}');
+                    sendJson(ex, 200, sb.toString());
+                } catch (Exception e) {
+                    log.error("/api/distill-ex failed: {}", e.toString(), e);
                     sendJson(ex, 200, "{\"success\":false,\"error\":\"" + esc(e.getMessage()) + "\"}");
                 }
             } else if (path.equals("/api/knowledge/collections") && "GET".equals(ex.getRequestMethod())) {

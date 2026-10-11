@@ -49,3 +49,45 @@
 
   --font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+
+/* ===== Desktop Glass theme overrides — dark glass ===== */
+html[data-theme="desktop-glass"] {
+  --jeve-bg: transparent;
+  --jeve-surface: rgba(28, 24, 58, 0.78);
+  --jeve-surface-secondary: rgba(42, 37, 80, 0.65);
+  --jeve-surface-hover: rgba(55, 48, 100, 0.82);
+  --jeve-text-primary: #F0EBFC;
+  --jeve-text-secondary: #CFC6E8;
+  --jeve-text-muted: #9C92BE;
+  --jeve-accent: #8B5CF6;
+  --jeve-accent-hover: #7C3AED;
+  --jeve-accent-soft: rgba(139, 92, 246, 0.22);
+  --jeve-border: rgba(167, 139, 250, 0.30);
+  --color-bg: transparent;
+  --color-surface: rgba(28, 24, 58, 0.78);
+  --color-text-primary: #F0EBFC;
+  --color-text-secondary: #CFC6E8;
+  --color-accent: #8B5CF6;
+  --color-accent-light: rgba(139, 92, 246, 0.22);
+  --color-border: rgba(167, 139, 250, 0.30);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --lg-bg: transparent;
+  --lg-surface: rgba(28, 24, 58, 0.78);
+  --lg-surface-strong: rgba(38, 33, 72, 0.88);
+  --lg-surface-hover: rgba(55, 48, 100, 0.82);
+  --lg-border: rgba(167, 139, 250, 0.30);
+  --lg-border-soft: rgba(167, 139, 250, 0.18);
+  --lg-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --lg-shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.28);
+  --lg-accent-tint: rgba(139, 92, 246, 0.22);
+  --lg-accent-tint-strong: rgba(139, 92, 246, 0.35);
+}
+html[data-theme="desktop-glass"],
+html[data-theme="desktop-glass"] body {
+  background: transparent !important;
+}
+html[data-theme="desktop-glass"] .jeve-shell {
+  background: rgba(22, 18, 48, 0.78) !important;
+  background-image: none !important;
+}

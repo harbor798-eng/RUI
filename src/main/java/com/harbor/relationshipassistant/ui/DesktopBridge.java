@@ -4,6 +4,8 @@ import javafx.animation.AnimationTimer;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
+import javafx.scene.paint.Color;
+import javafx.scene.web.WebView;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.util.Duration;
@@ -11,14 +13,63 @@ import netscape.javascript.JSObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
+import com.sun.jna.win32.StdCallLibrary;
+import java.lang.reflect.Method;
+
 public class DesktopBridge {
     private static final Logger log = LoggerFactory.getLogger(DesktopBridge.class);
     private final Stage stage;
+    private final WebView webView;
     private final String bridgeId = java.util.UUID.randomUUID().toString().substring(0, 8);
     private double dragOffsetX;
     private double dragOffsetY;
     private Runnable collectorOn;
     private Runnable collectorOff;
+
+    // DWM constants
+    private static final int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    private static final int DWMSBT_TRANSIENTWINDOW = 3; // Desktop Acrylic
+    private static final int DWMSBT_NONE = 0;
+
+    public interface DwmApi extends StdCallLibrary {
+        DwmApi INSTANCE = Native.load("dwmapi", DwmApi.class);
+        int DwmSetWindowAttribute(Pointer hwnd, int attr, int[] value, int size);
+    }
+
+    private long cachedHwnd = 0;
+
+    private long getHwnd() {
+        if (cachedHwnd != 0) return cachedHwnd;
+        try {
+            java.util.List<?> windows = com.sun.glass.ui.Window.getWindows();
+            for (Object w : windows) {
+                Method m = w.getClass().getMethod("getNativeWindow");
+                cachedHwnd = (Long) m.invoke(w);
+                return cachedHwnd;
+            }
+        } catch (Exception e) {
+            log.warn("[BridgeDiag][DWM] getHwnd failed: {}", e.toString());
+        }
+        return 0;
+    }
+
+    private void applyDwmBackdrop(int backdropType) {
+        try {
+            long hwnd = getHwnd();
+            if (hwnd == 0) {
+                log.warn("[BridgeDiag][DWM] no HWND available");
+                return;
+            }
+            Pointer ptr = new Pointer(hwnd);
+            int r = DwmApi.INSTANCE.DwmSetWindowAttribute(
+                    ptr, DWMWA_SYSTEMBACKDROP_TYPE, new int[]{backdropType}, 4);
+            log.info("[BridgeDiag][DWM] backdrop={} result={} hwnd=0x{}", backdropType, r, Long.toHexString(hwnd));
+        } catch (Throwable t) {
+            log.warn("[BridgeDiag][DWM] failed: {}", t.toString());
+        }
+    }
 
     // Edge auto-hide state
     private enum Edge { NONE, LEFT, RIGHT, TOP }
@@ -33,8 +84,13 @@ public class DesktopBridge {
     private static final long EDGE_ANIM_MS = 400;
 
     public DesktopBridge(Stage stage) {
+        this(stage, null);
+    }
+
+    public DesktopBridge(Stage stage, WebView webView) {
         this.stage = stage;
-        log.info("[BridgeDiag][Bridge] created bridgeId={} stage={}", bridgeId, stage != null ? "attached" : "null");
+        this.webView = webView;
+        log.info("[BridgeDiag][Bridge] created bridgeId={} stage={} webView={}", bridgeId, stage != null ? "attached" : "null", webView != null ? "attached" : "null");
         // Track mouse exit from window for edge docking hide
         Platform.runLater(() -> {
             if (stage != null && stage.getScene() != null) {
@@ -78,10 +134,18 @@ public class DesktopBridge {
         dragOffsetY = stage.getY() - screenY;
     }
 
+    /** Use JavaFX native window drag gesture — handles mouse capture on transparent WebView. */
+    public void startNativeDrag() {
+        // stage.startDrag() not available in JavaFX 26; drag handled by native Region overlay.
+        log.info("[BridgeDiag][Bridge] startNativeDrag no-op (native Region handles drag) bridgeId={}", bridgeId);
+    }
+
     public void dragTo(double screenX, double screenY) {
         Platform.runLater(() -> {
-            stage.setX(screenX + dragOffsetX);
-            stage.setY(screenY + dragOffsetY);
+            double nx = screenX + dragOffsetX;
+            double ny = screenY + dragOffsetY;
+            stage.setX(nx);
+            stage.setY(ny);
         });
     }
 
@@ -194,35 +258,111 @@ public class DesktopBridge {
     }
 
     public void openProfilePage() {
-        log.info("[Bridge][Profile] openProfilePage called bridgeId={}", bridgeId);
+        openExternalUrl("http://127.0.0.1:18080/profile.html");
+    }
+
+    /** 通用：在系统默认浏览器中打开指定 URL。 */
+    public void openExternalUrl(String url) {
+        log.info("[Bridge] openExternalUrl: {}", url);
         try {
             if (!java.awt.Desktop.isDesktopSupported()) {
-                log.warn("[Bridge][Profile] Desktop browse is not supported");
+                log.warn("[Bridge] Desktop not supported");
                 return;
             }
             java.awt.Desktop desktop = java.awt.Desktop.getDesktop();
             if (!desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
-                log.warn("[Bridge][Profile] BROWSE action is not supported");
+                log.warn("[Bridge] BROWSE action not supported");
                 return;
             }
-            log.info("[Bridge][Profile] Desktop supported=true, Browse supported=true");
-            java.net.URI uri = java.net.URI.create("http://127.0.0.1:18080/profile.html");
+            java.net.URI uri = java.net.URI.create(url);
             Thread t = new Thread(() -> {
                 try {
                     desktop.browse(uri);
-                    log.info("[Bridge][Profile] Opening external browser: {}", uri);
                 } catch (Exception e) {
-                    log.error("[Bridge][Profile] Failed to open external browser", e);
+                    log.error("[Bridge] Failed to open {}", url, e);
                 }
-            }, "profile-browser-open");
+            }, "external-browser-open");
             t.setDaemon(true);
             t.start();
         } catch (Throwable e) {
-            log.error("[Bridge][Profile] openProfilePage error", e);
+            log.error("[Bridge] openExternalUrl error", e);
         }
     }
 
     public String getBridgeId() { return bridgeId; }
+
+    /**
+     * Toggle theme. Classic = warm grey #F6F5F2 with opaque WebView.
+     * Desktop Glass = transparent frame + transparent pageFill + DWM Acrylic.
+     */
+    public void setGlassTheme(boolean glass) {
+        Platform.runLater(() -> {
+            if (stage == null || stage.getScene() == null) {
+                log.warn("[BridgeDiag][Theme] setGlassTheme called but stage/scene is null");
+                return;
+            }
+            Object root = stage.getScene().getRoot();
+            log.info("[BridgeDiag][Theme] setGlassTheme glass={}, rootClass={}", glass,
+                    root == null ? "null" : root.getClass().getName());
+
+            // 1. Frame background
+            if (root instanceof javafx.scene.layout.Region r) {
+                if (glass) {
+                    r.setStyle("-fx-background-color: rgba(0,0,0,0.01); -fx-background-radius: 18; -fx-background-insets: 0;"); // [EXPERIMENT] was transparent
+                } else {
+                    r.setStyle("-fx-background-color: #F6F5F2; -fx-background-radius: 18; -fx-background-insets: 0;");
+                }
+            }
+
+            // 2. WebView pageFill
+            if (webView != null) {
+                if (glass) {
+                    webView.setPageFill(Color.TRANSPARENT);
+                } else {
+                    webView.setPageFill(Color.WHITE);
+                }
+                log.info("[BridgeDiag][Theme] pageFill={}", webView.getPageFill());
+            }
+
+            // 3. DWM Acrylic (disabled for hit-testing test)
+            boolean dwmEnabled = Boolean.getBoolean("rui.dwm");
+            if (glass && dwmEnabled) {
+                applyDwmBackdrop(DWMSBT_TRANSIENTWINDOW);
+            } else {
+                applyDwmBackdrop(DWMSBT_NONE);
+            }
+
+            log.info("[BridgeDiag][Theme] done glass={}", glass);
+        });
+    }
+
+    /** Diagnostic logger: JS calls this to push runtime state to the Java terminal. */
+    public void diagTheme(String msg) {
+        log.info("[ThemeDiag][JS] {}", msg);
+    }
+
+    /** Walk the scene graph and log every Region's background style to find the white blocker. */
+    public void diagScene() {
+        Platform.runLater(() -> {
+            if (stage == null || stage.getScene() == null) return;
+            log.info("[ThemeDiag][FX] === Scene graph backgrounds ===");
+            logNode(stage.getScene().getRoot(), 0);
+        });
+    }
+    private void logRegion(javafx.scene.Node n, int depth) {
+        String pad = "  ".repeat(depth);
+        String style = n instanceof javafx.scene.layout.Region r ? r.getStyle() : "n/a";
+        String bg = n instanceof javafx.scene.layout.Region r ? String.valueOf(r.getBackground()) : "n/a";
+        log.info("[ThemeDiag][FX] {}{} style='{}' bg='{}'", pad, n.getClass().getSimpleName(), style, bg);
+    }
+    private void logNode(javafx.scene.Node n, int depth) {
+        logRegion(n, depth);
+        if (n instanceof javafx.scene.Parent p) {
+            for (javafx.scene.Node child : p.getChildrenUnmodifiable()) {
+                logNode(child, depth + 1);
+            }
+        }
+    }
 
     public static void inject(javafx.scene.web.WebEngine engine, DesktopBridge bridge) {
         try {

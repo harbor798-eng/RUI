@@ -123,16 +123,25 @@
   let dragging = false;
   document.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    if (!e.target.closest('.jeve-header')) return;
-    if (e.target.closest('button, a, input, select, textarea, [data-no-drag]')) return;
+    const onHeader = e.target.closest('.jeve-header');
+    const onButton = e.target.closest('button, a, input, select, textarea, [data-no-drag]');
+    if (window.desktopBridge && window.desktopBridge.diagTheme) {
+      try { window.desktopBridge.diagTheme('[DragDiag] mousedown target=' + e.target.tagName + ' onHeader=' + !!onHeader + ' onButton=' + !!onButton + ' bridge=' + (!!window.desktopBridge.startDrag)); } catch(err) {}
+    }
+    if (!onHeader) return;
+    if (onButton) return;
     if (!window.desktopBridge) return;
-    try { window.desktopBridge.startDrag(e.screenX, e.screenY); dragging = true; } catch (err) {}
+    // Use JavaFX native drag — handles mouse capture on transparent WebView
+    if (typeof window.desktopBridge.startNativeDrag === 'function') {
+      try { window.desktopBridge.startNativeDrag(); dragging = true; } catch (err) {}
+    } else {
+      try { window.desktopBridge.startDrag(e.screenX, e.screenY); dragging = true; } catch (err) {}
+    }
   });
   document.addEventListener('mousemove', (e) => {
     if (!dragging || !window.desktopBridge) return;
     try { window.desktopBridge.dragTo(e.screenX, e.screenY); } catch (err) {}
-  });
-  document.addEventListener('mouseup', () => {
+  });  document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
     if (window.desktopBridge) { try { window.desktopBridge.endDrag(); } catch (err) {} }

@@ -16,14 +16,17 @@
     'collect-settings': '采集设置',
     'wechat-history': '微信聊天记录',
     'wechat-read': '从微信读取',
-    'skill-management': 'Skill 管理'
+    'skill-management': 'Skill 管理',
+    'theme-settings': '外观主题',
+    'distill-identity': '人物蒸馏',
+    'distill': '前任蒸馏'
   };
-  const BACK_PAGES = { 'chat-history': true, 'detail-analysis': true, 'ai-observation': true, 'settings': true, 'ai-config': true, 'collect-settings': true, 'wechat-history': true, 'wechat-read': true, 'skill-management': true };
+  const BACK_PAGES = { 'chat-history': true, 'detail-analysis': true, 'ai-observation': true, 'settings': true, 'ai-config': true, 'collect-settings': true, 'wechat-history': true, 'wechat-read': true, 'skill-management': true, 'theme-settings': true, 'distill-identity': true, 'distill': true };
 
   // Settings context: all pages under settings hierarchy — hide bottom nav & resync button
-  const SETTINGS_PAGES = new Set(['settings', 'ai-config', 'collect-settings', 'wechat-history', 'wechat-read', 'ai-observation', 'skill-management']);
+  const SETTINGS_PAGES = new Set(['settings', 'ai-config', 'collect-settings', 'wechat-history', 'wechat-read', 'ai-observation', 'skill-management', 'theme-settings', 'distill-identity', 'distill']);
   // Pages where bottom nav should also be hidden (already the target page)
-  const BOTTOM_NAV_HIDDEN = new Set(['settings', 'ai-config', 'collect-settings', 'wechat-history', 'wechat-read', 'ai-observation', 'skill-management', 'chat-history', 'detail-analysis']);
+  const BOTTOM_NAV_HIDDEN = new Set(['settings', 'ai-config', 'collect-settings', 'wechat-history', 'wechat-read', 'ai-observation', 'skill-management', 'theme-settings', 'distill-identity', 'distill', 'chat-history', 'detail-analysis']);
   // Parent hierarchy for back navigation
   const PAGE_PARENT = {
     'settings': 'home',
@@ -33,6 +36,9 @@
     'wechat-read': 'wechat-history',
     'ai-observation': 'settings',
     'skill-management': 'settings',
+    'theme-settings': 'settings',
+    'distill-identity': 'skill-management',
+    'distill': 'distill-identity',
     'chat-history': 'home',
     'detail-analysis': 'home'
   };
@@ -47,7 +53,10 @@
     'wechat-read': renderWechatRead,
     'chat-history': renderChatHistory,
     'detail-analysis': renderDetailAnalysis,
-    'skill-management': renderSkillManagement
+    'skill-management': renderSkillManagement,
+    'theme-settings': renderThemeSettings,
+    'distill-identity': renderDistillIdentity,
+    'distill': renderDistill
   };
 
   function normalizeStrategy(s) {
@@ -63,6 +72,68 @@
   let currentRelationshipId = null;
   let currentSkillName = '';
   try { currentSkillName = localStorage.getItem('ruiActiveSkill') || ''; } catch(e) {}
+
+  /* ===== Theme: Classic vs Desktop Glass ===== */
+  function getTheme() {
+    try { return localStorage.getItem('ruiTheme') || 'classic'; } catch(e) { return 'classic'; }
+  }
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const glass = theme === 'desktop-glass';
+    // Use setProperty with 'important' to override liquid-glass.css !important rules.
+    if (glass) {
+      document.documentElement.style.setProperty('background', 'transparent', 'important');
+      document.documentElement.style.setProperty('background-image', 'none', 'important');
+      document.body.style.setProperty('background', 'transparent', 'important');
+      document.body.style.setProperty('background-image', 'none', 'important');
+      document.querySelectorAll('.jeve-shell').forEach(el => {
+        el.style.setProperty('background', 'rgba(22, 18, 48, 0.78)', 'important');
+        el.style.setProperty('background-image', 'none', 'important');
+      });
+    } else {
+      document.documentElement.style.removeProperty('background');
+      document.documentElement.style.removeProperty('background-image');
+      document.body.style.removeProperty('background');
+      document.body.style.removeProperty('background-image');
+      document.querySelectorAll('.jeve-shell').forEach(el => {
+        el.style.removeProperty('background');
+        el.style.removeProperty('background-image');
+      });
+    }
+    if (window.desktopBridge && window.desktopBridge.diagTheme) {
+      try {
+        const htmlBg = getComputedStyle(document.documentElement).backgroundColor;
+        const bodyBg = getComputedStyle(document.body).backgroundColor;
+        const shell = document.querySelector('.jeve-shell');
+        const shellBg = shell ? getComputedStyle(shell).backgroundColor : 'no-shell';
+        const shellImg = shell ? getComputedStyle(shell).backgroundImage : 'no-shell';
+        window.desktopBridge.diagTheme('applyTheme theme=' + theme +
+          ' dataset=' + document.documentElement.dataset.theme +
+          ' htmlBg=' + htmlBg +
+          ' bodyBg=' + bodyBg +
+          ' shellBg=' + shellBg +
+          ' shellImg=' + shellImg);
+      } catch(e) {}
+    }
+    if (window.desktopBridge && window.desktopBridge.setGlassTheme) {
+      try { window.desktopBridge.setGlassTheme(glass); } catch(e) {}
+    }
+    if (window.desktopBridge && window.desktopBridge.diagScene) {
+      try { window.desktopBridge.diagScene(); } catch(e) {}
+    }
+  }
+  applyTheme(getTheme());
+  // Bridge is injected after WebEngine loads; retry until it appears.
+  let themeRetries = 0;
+  const themeTimer = setInterval(() => {
+    themeRetries++;
+    if (window.desktopBridge && window.desktopBridge.setGlassTheme) {
+      clearInterval(themeTimer);
+      applyTheme(getTheme());
+    } else if (themeRetries > 50) {
+      clearInterval(themeTimer);
+    }
+  }, 200);
   const daCache = {}; // relationshipId -> {data}
   const qrCache = {}; // `${relId}|${skillName}` -> {byStrategy, single, singleSkillLabel}
 
@@ -258,7 +329,15 @@
     try {
       const res = await fetch('http://127.0.0.1:18080/api/skills');
       const data = await res.json();
-      const list = (data.skills || []).filter(s => !['quick-reply','direct-reply'].includes(s.name));
+      const list = (data.skills || [])
+        .filter(s => !['quick-reply','direct-reply'].includes(s.name))
+        .filter(s => s.kind !== 'SYSTEM')
+        .filter(s => s.enabled !== false);
+      // If current selection was disabled, fall back to default
+      if (currentSkillName && !list.find(s => s.name === currentSkillName)) {
+        currentSkillName = '';
+        try { localStorage.setItem('ruiActiveSkill', ''); } catch(e) {}
+      }
       const opts = ['<button type="button" class="jeve-dropdown-option' + (currentSkillName === '' ? ' selected' : '') + '" data-value="">默认三策略</button>'];
       list.forEach(s => {
         opts.push('<button type="button" class="jeve-dropdown-option' + (currentSkillName === s.name ? ' selected' : '') + '" data-value="' + escapeHtml(s.name) + '">' + escapeHtml(s.name) + '</button>');
@@ -294,6 +373,7 @@
   }
 
   function renderSettings() {
+    const cur = getTheme();
     return `<div class="settings-list">
       <div class="qr-card settings-item" data-page="ai-config">
         <div class="settings-item-main"><h3>AI 配置</h3><p class="muted">服务商、API Key、Base URL、模型</p></div>
@@ -315,9 +395,115 @@
         <div class="settings-item-main"><h3>Skill 管理</h3><p class="muted" id="settings-current-skill">当前 Skill：<span id="settings-current-skill-name"></span></p></div>
         <span class="settings-arrow">›</span>
       </div>
+      <div class="qr-card settings-item" data-page="theme-settings">
+        <div class="settings-item-main"><h3>外观主题</h3><p class="muted">切换应用外观与玻璃效果</p></div>
+        <span class="settings-arrow">›</span>
+      </div>
       <div class="qr-card settings-item" id="settings-about" style="cursor:pointer;">
         <div class="settings-item-main"><h3>关于</h3><p class="muted">JEVE · Web UI V1。</p></div>
         <span class="settings-arrow">›</span>
+      </div>
+    </div>`;
+  }
+
+  function renderThemeSettings() {
+    const cur = getTheme();
+    return `<div class="settings-list" style="padding:12px;">
+      <div class="qr-card theme-option-card ${cur==='classic'?'active':''}" data-theme-val="classic" style="cursor:pointer;padding:14px;">
+        <h3 style="margin:0 0 4px;font-size:14px;">Classic</h3>
+        <p class="muted" style="margin:0;">暖白稳定主题</p>
+      </div>
+      <div class="qr-card theme-option-card ${cur==='desktop-glass'?'active':''}" data-theme-val="desktop-glass" style="cursor:pointer;padding:14px;margin-top:10px;">
+        <h3 style="margin:0 0 4px;font-size:14px;">Desktop Glass</h3>
+        <p class="muted" style="margin:0;">紫色玻璃质感，桌面毛玻璃效果</p>
+      </div>
+    </div>`;
+  }
+
+  function renderDistillIdentity() {
+    const cards = [
+      { id: 'ex', title: '前任', desc: '基于聊天记录蒸馏前任的说话风格与共同记忆', enabled: true },
+      { id: 'self', title: '自己', desc: '蒸馏本人的说话风格', enabled: false },
+      { id: 'generic', title: '通用', desc: '通用人物画像 Skill', enabled: false }
+    ];
+    return `<div class="settings-list" style="padding:12px;">
+      <div class="qr-card" style="padding:14px;">
+        <h3 style="margin:0 0 6px;font-size:15px;">人物蒸馏</h3>
+        <p class="muted" style="margin:0 0 12px;font-size:12px;line-height:1.5;">选择要蒸馏的人物身份，后续可扩展。</p>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${cards.map(c => `
+            <div class="qr-card settings-item" data-identity="${c.id}" style="${c.enabled ? 'cursor:pointer;' : 'opacity:0.55;'}">
+              <div class="settings-item-main">
+                <h3 style="font-size:14px;margin:0 0 2px;">${c.title}${c.enabled ? '' : ' <span style="font-size:10px;color:#888;font-weight:normal;">· 暂未开放</span>'}</h3>
+                <p class="muted" style="font-size:11px;margin:0;">${c.desc}</p>
+              </div>
+              ${c.enabled ? '<span class="settings-arrow">›</span>' : ''}
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function bindDistillIdentity() {
+    document.querySelectorAll('[data-identity]').forEach(card => {
+      card.addEventListener('click', () => {
+        const id = card.dataset.identity;
+        if (id === 'ex') {
+          navigate('distill');
+        } else {
+          const status = document.getElementById('distill-status-identity');
+          // show a small toast-like message inline
+          const hint = document.createElement('div');
+          hint.style.cssText = 'margin-top:10px;font-size:12px;color:#ffb86b;';
+          hint.textContent = '「' + card.querySelector('h3').childNodes[0].textContent.trim() + '」暂未开放，敬请期待。';
+          // avoid duplicates
+          const old = document.getElementById('distill-status-identity');
+          if (old) old.remove();
+          hint.id = 'distill-status-identity';
+          card.parentElement.parentElement.appendChild(hint);
+        }
+      });
+    });
+  }
+
+  function renderDistill() {
+    return `<div class="settings-list" style="padding:12px;">
+      <div class="qr-card" style="padding:14px;">
+        <h3 style="margin:0 0 6px;font-size:15px;">前任 Skill 蒸馏</h3>
+        <p class="muted" style="margin:0 0 10px;font-size:12px;line-height:1.5;">从聊天记录生成共同记忆 + Persona，可组合多种材料来源。</p>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <input id="ex-nickname" placeholder="她的昵称/代号（如：小美）" style="padding:8px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(139,92,246,0.3);color:var(--jeve-text,#eee);font-size:12px;">
+          <input id="ex-relationship" placeholder="关系描述（如：在一起三年 大学同学）" style="padding:8px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(139,92,246,0.3);color:var(--jeve-text,#eee);font-size:12px;">
+          <input id="ex-tags" placeholder="性格标签（如：ENFP 焦虑型 爱撒娇）" style="padding:8px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(139,92,246,0.3);color:var(--jeve-text,#eee);font-size:12px;">
+        </div>
+        <div style="margin-top:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:12px;color:#a78bfa;font-weight:600;">材料来源</span>
+            <span style="font-size:10px;color:#888;">支持多选，按顺序拼接</span>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);font-size:12px;color:var(--jeve-text,#eee);cursor:pointer;margin-bottom:6px;">
+            <input type="checkbox" id="ex-use-db" checked style="accent-color:#7c3aed;">
+            <span>使用 RUI 数据库聊天记录<span style="color:#888;font-size:10px;">（当前选中联系人）</span></span>
+          </label>
+          <div id="ex-materials" style="display:flex;flex-direction:column;gap:6px;"></div>
+          <div style="display:flex;gap:6px;margin-top:6px;position:relative;">
+            <div id="ex-add-type-wrap" style="flex:1;position:relative;">
+              <button type="button" id="ex-add-type" data-value="WECHAT_FILE"
+                style="width:100%;padding:6px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(139,92,246,0.3);color:var(--jeve-text,#eee);font-size:12px;text-align:left;cursor:pointer;">微信导出文件</button>
+              <div id="ex-add-type-panel" style="display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;background:rgba(32,27,65,0.96);border:1px solid rgba(167,139,250,0.4);border-radius:8px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden;">
+                <div data-val="WECHAT_FILE" class="ex-dd-item">微信导出文件</div>
+                <div data-val="QQ_FILE" class="ex-dd-item">QQ 导出文件</div>
+                <div data-val="SMS_FILE" class="ex-dd-item">短信导出（需 Python）</div>
+                <div data-val="SOCIAL_FILE" class="ex-dd-item">社交媒体导出（需 Python）</div>
+                <div data-val="PHOTO_DIR" class="ex-dd-item">照片目录（需 Python）</div>
+              </div>
+            </div>
+            <button id="ex-add" style="flex-shrink:0;padding:6px 12px;font-size:12px;border:1px solid rgba(139,92,246,0.4);background:rgba(139,92,246,0.1);color:#a78bfa;border-radius:6px;cursor:pointer;">添加</button>
+          </div>
+          <div class="muted" style="font-size:10px;margin-top:4px;color:#888;">注：短信/社交媒体/照片目录需本机 Python。iMessage 仅支持 macOS，未接入。</div>
+        </div>
+        <button id="ex-start" style="margin-top:12px;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#7c3aed,#6366f1);color:#fff;cursor:pointer;font-size:13px;width:100%;">蒸馏前任（约 60-120 秒）</button>
+        <div id="distill-status" class="muted" style="margin-top:10px;font-size:12px;"></div>
       </div>
     </div>`;
   }
@@ -452,7 +638,7 @@
     return `<div class="qr-card" style="margin-bottom:12px;">
       <h3>AI 档案</h3>
       <p class="muted" style="font-size:12px;">管理我的档案与对方档案</p>
-      <button class="primary" style="margin-top:8px;" onclick="alert('AI 档案页面待开发')">进入 AI 档案</button>
+      <button class="primary" style="margin-top:8px;" id="do-open-profile">进入 AI 档案</button>
     </div>
     <p class="muted">这段关系一路发生了什么？</p>
       <div class="qr-grid">
@@ -763,8 +949,10 @@
     if (page === 'wechat-history') bindWechatHistory();
     if (page === 'wechat-read') bindWechatRead();
     initJeveDropdowns();
-    if (page === 'settings') { bindSettings(); const sl = document.getElementById('settings-current-skill-name'); if (sl) sl.textContent = currentSkillName || '默认三策略'; }
+    if (page === 'settings' || page === 'theme-settings') { bindSettings(); const sl = document.getElementById('settings-current-skill-name'); if (sl) sl.textContent = currentSkillName || '默认三策略'; }
     if (page === 'skill-management') bindSkillManagement();
+    if (page === 'distill-identity') bindDistillIdentity();
+    if (page === 'distill') bindDistill();
   }
 
   /* ===== Chat history ===== */
@@ -854,19 +1042,11 @@
   document.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const menu = document.getElementById('ctx-menu');
-    if (e.target.closest && e.target.closest('#ctx-menu')) {
-      console.log('[ContextMenuDebug] target=ctx-menu nativePrevented=true reason=custom-menu');
-      return;
-    }
+    if (e.target.closest && e.target.closest('#ctx-menu')) return;
     const bubble = e.target.closest ? e.target.closest('.bubble') : null;
-    if (!bubble) {
-      console.log('[ContextMenuDebug] target=', e.target.tagName, 'isBubble=false menuShown=false');
-      closeCtxMenu();
-      return;
-    }
+    if (!bubble) { closeCtxMenu(); return; }
     const row = bubble.closest('.bubble-row');
     ctxTargetId = row ? row.dataset.id : null;
-    // Pressed state: clear previous, mark current
     document.querySelectorAll('.bubble.pressed').forEach(b => b.classList.remove('pressed'));
     bubble.classList.add('pressed');
     menu.style.display = 'block';
@@ -878,14 +1058,24 @@
     left = Math.max(8, left); top = Math.max(8, top);
     menu.style.left = left + 'px';
     menu.style.top = top + 'px';
-    console.log('[ContextMenuDebug] isBubble=true messageId=', ctxTargetId, 'menuShown=true');
+    ctxMenuOpenAt = Date.now();
   });
-  document.addEventListener('click', closeCtxMenu);
-  document.addEventListener('scroll', closeCtxMenu, true);
+  let ctxMenuOpenAt = 0;
+  // 只在菜单外部点击时关闭；菜单项自身的点击由 1073 行处理。
+  // 300ms 内忽略 click，避免 contextmenu 后的合成 click 立即关闭菜单。
   document.addEventListener('click', (e) => {
+    if (Date.now() - ctxMenuOpenAt < 300) return;
     const menu = document.getElementById('ctx-menu');
-    if (menu && menu.style.display === 'block' && !menu.contains(e.target)) menu.style.display = 'none';
+    if (menu && menu.style.display === 'block' && !menu.contains(e.target)) {
+      menu.style.display = 'none';
+      document.querySelectorAll('.bubble.pressed').forEach(b => b.classList.remove('pressed'));
+    }
   });
+  document.addEventListener('scroll', () => {
+    // Don't close on scroll within 500ms of opening (prevents reflow-triggered flicker)
+    if (Date.now() - ctxMenuOpenAt < 500) return;
+    closeCtxMenu();
+  }, true);
   document.getElementById('ctx-menu').addEventListener('click', async (e) => {
     const act = e.target.dataset.act;
     document.getElementById('ctx-menu').style.display = 'none';
@@ -980,6 +1170,12 @@
 
   /* ===== Deep observation ===== */
   function bindDeepObs() {
+    const profileBtn = document.getElementById('do-open-profile');
+    if (profileBtn) profileBtn.onclick = () => {
+      if (window.desktopBridge && typeof window.desktopBridge.openProfilePage === 'function') {
+        window.desktopBridge.openProfilePage();
+      }
+    };
     const btn = document.getElementById('do-start');
     if (!btn) return;
     btn.addEventListener('click', async () => {
@@ -1411,18 +1607,30 @@
 
   function renderSkillMgmtList() {
     const { skills } = skCache;
-    return skills.map(s => {
+    const distillEntry = `<div class="qr-card settings-item" data-open-distill="1" style="border:1px solid rgba(139,92,246,0.4);background:linear-gradient(135deg,rgba(124,58,237,0.12),rgba(99,102,241,0.08));">
+      <div class="settings-item-main" style="min-width:0;">
+        <h3 style="font-size:15px;font-weight:700;color:var(--color-accent);margin:0 0 2px;">✨ 人物蒸馏</h3>
+        <p class="muted" style="font-size:11px;margin:0;color:var(--color-text-primary);">从聊天记录生成前任/个人说话风格 Skill</p>
+      </div>
+      <span class="settings-arrow">›</span>
+    </div>`;
+    const list = skills.map(s => {
       const isActive = (s.name === 'default-three-strategy' && currentSkillName === '') || s.name === currentSkillName;
       const kindLabel = s.kind === 'SYSTEM' ? 'RUI 内置' : '用户 Skill';
-      return `<div class="qr-card settings-item" data-skill="${escapeHtml(s.name)}">
+      const enabled = s.enabled !== false;
+      const toggle = s.kind === 'SYSTEM'
+        ? ''
+        : `<button data-toggle-skill="${escapeHtml(s.name)}" data-enabled="${enabled}" style="padding:3px 10px;font-size:11px;border-radius:5px;cursor:pointer;border:1px solid ${enabled ? 'rgba(255,100,100,0.4)' : 'rgba(100,200,100,0.4)'};background:transparent;color:${enabled ? '#ff8888' : '#88dd88'};white-space:nowrap;">${enabled ? '停用' : '启用'}</button>`;
+      return `<div class="qr-card settings-item" data-skill="${escapeHtml(s.name)}" style="${enabled ? '' : 'opacity:0.6;'}">
         <div class="settings-item-main" style="min-width:0;">
           <h3 style="font-size:15px;font-weight:700;color:var(--color-accent);margin:0 0 2px;">${escapeHtml(skillDisplayName(s))}</h3>
           <p class="muted" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 0 2px;color:var(--color-text-primary);">${escapeHtml(s.description || '')}</p>
-          <p class="muted" style="font-size:11px;color:#999;margin:0;">${kindLabel}</p>
+          <p class="muted" style="font-size:11px;color:#999;margin:0;">${kindLabel} · ${enabled ? '已启用' : '已停用'}</p>
         </div>
-        ${isActive ? '<span style="font-size:12px;color:#7c5cff;white-space:nowrap;"></span>' : '<span class="settings-arrow">›</span>'}
+        ${toggle}
       </div>`;
     }).join('');
+    return distillEntry + list;
   }
 
   function renderSkillDetail(skillName) {
@@ -1576,8 +1784,46 @@
       const backBtn = document.getElementById('header-back');
       if (backBtn) backBtn.onclick = () => navigate('settings');
       list.innerHTML = renderSkillMgmtList();
+      const distillEntry = list.querySelector('[data-open-distill]');
+      if (distillEntry) distillEntry.addEventListener('click', () => navigate('distill-identity'));
+      // Toggle enable/disable
+      list.querySelectorAll('[data-toggle-skill]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const name = btn.dataset.toggleSkill;
+          const currentlyEnabled = btn.dataset.enabled === 'true';
+          const action = currentlyEnabled ? 'disable' : 'enable';
+          btn.disabled = true;
+          try {
+            const r = await fetch('http://127.0.0.1:18080/api/skills/' + encodeURIComponent(name) + '/' + action, { method: 'POST' });
+            const d = await r.json();
+            if (d.success) {
+              // refresh cache and re-render
+              const skillsRes = await fetch('http://127.0.0.1:18080/api/skills');
+              const skillsData = await skillsRes.json();
+              skCache.skills = (skillsData.skills || []).filter(s => !['quick-reply','direct-reply'].includes(s.name));
+              renderSmView();
+              // If we just disabled the currently selected skill, reset selection
+              if (action === 'disable' && currentSkillName === name) {
+                currentSkillName = '';
+                try { localStorage.setItem('ruiActiveSkill', ''); } catch(e2) {}
+              }
+              loadSkillSelector();
+            } else {
+              alert('操作失败: ' + (d.error || '未知错误'));
+              btn.disabled = false;
+            }
+          } catch (err) {
+            alert('请求失败: ' + err.message);
+            btn.disabled = false;
+          }
+        });
+      });
       list.querySelectorAll('[data-skill]').forEach(card => {
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+          // Don't navigate to detail when clicking toggle button
+          if (e.target.closest('[data-toggle-skill]')) return;
           smView = { mode: 'detail', skill: card.dataset.skill, expandedColl: null };
           renderSmView();
         });
@@ -1645,8 +1891,22 @@
 
   global.escapeHtml = escapeHtml;
   global.JeveRouter = { navigate };
+  global.applyTheme = applyTheme;
+  global.getCurrentRelationshipId = () => currentRelationshipId;
 })(window);
   function bindSettings() {
+    document.querySelectorAll('.theme-option-card').forEach(card => {
+      card.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const t = card.dataset.themeVal;
+        try { localStorage.setItem('ruiTheme', t); } catch(e2) {}
+        applyTheme(t);
+        document.querySelectorAll('.theme-option-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.themeVal === t);
+        });
+      };
+    });
     const el = document.getElementById('settings-profile');
     if (el) el.onclick = () => {
       console.log('[AIProfileUI] open-profile');
@@ -1671,6 +1931,176 @@
       ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
       document.getElementById('about-close').onclick = () => ov.remove();
     };
+  }
+
+  function bindDistill() {
+    const status = document.getElementById('distill-status');
+    function setStatus(msg) {
+      if (status) { status.textContent = msg; status.style.color = '#e8e0ff'; status.style.fontWeight = '500'; }
+      console.log('[DISTILL] ' + msg);
+    }
+    function getCurrentRelId() {
+      try {
+        if (typeof window.getCurrentRelationshipId === 'function') {
+          const id = window.getCurrentRelationshipId();
+          if (id) return id;
+        }
+      } catch(e) {}
+      const dd = document.getElementById('contact-select');
+      if (dd && dd.dataset.value && dd.dataset.value !== 'current') {
+        const v = parseInt(dd.dataset.value, 10);
+        if (!isNaN(v)) return v;
+      }
+      return null;
+    }
+
+    const TYPE_META = {
+      WECHAT_FILE:  { label: '微信导出文件',     placeholder: 'C:\\path\\wechat.txt（.txt/.html/.csv）' },
+      QQ_FILE:      { label: 'QQ 导出文件',     placeholder: 'C:\\path\\qq.txt（.txt/.html/.csv）' },
+      SMS_FILE:     { label: '短信导出',         placeholder: 'C:\\path\\sms.xml（.xml/.csv/.txt）' },
+      SOCIAL_FILE:  { label: '社交媒体导出',     placeholder: 'C:\\path\\social.json' },
+      PHOTO_DIR:    { label: '照片目录',         placeholder: 'C:\\path\\photos\\' }
+    };
+
+    const materialsBox = document.getElementById('ex-materials');
+
+    function addMaterialRow(type) {
+      const meta = TYPE_META[type];
+      if (!meta) return;
+      const row = document.createElement('div');
+      row.dataset.type = type;
+      row.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:nowrap;';
+      row.innerHTML = `
+        <span style="font-size:11px;color:#a78bfa;min-width:80px;flex-shrink:0;">${meta.label}</span>
+        <input data-path placeholder="${meta.placeholder || ''}"
+          style="flex:1;min-width:0;padding:6px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(139,92,246,0.3);color:var(--jeve-text,#eee);font-size:11px;">
+        <button data-rm style="flex-shrink:0;padding:4px 8px;font-size:11px;background:transparent;border:1px solid rgba(255,100,100,0.4);color:#ff8888;border-radius:4px;cursor:pointer;">×</button>`;
+      row.querySelector('[data-rm]').onclick = () => row.remove();
+      materialsBox.appendChild(row);
+    }
+
+    // 自定义下拉
+    const ddBtn = document.getElementById('ex-add-type');
+    const ddPanel = document.getElementById('ex-add-type-panel');
+    const ddLabel = ddBtn;
+    const ddItems = ddPanel.querySelectorAll('.ex-dd-item');
+    function setDDValue(val, label) {
+      ddBtn.dataset.value = val;
+      ddBtn.textContent = label;
+      ddItems.forEach(it => it.classList.toggle('selected', it.dataset.val === val));
+      ddPanel.style.display = 'none';
+    }
+    ddBtn.onclick = (e) => {
+      e.stopPropagation();
+      ddPanel.style.display = ddPanel.style.display === 'block' ? 'none' : 'block';
+    };
+    ddItems.forEach(it => {
+      it.onclick = (e) => {
+        e.stopPropagation();
+        setDDValue(it.dataset.val, it.textContent);
+      };
+    });
+    document.addEventListener('click', (e) => {
+      if (!ddPanel.contains(e.target) && e.target !== ddBtn) ddPanel.style.display = 'none';
+    });
+
+    document.getElementById('ex-add').onclick = () => {
+      addMaterialRow(ddBtn.dataset.value || 'WECHAT_FILE');
+    };
+
+    const btn = document.getElementById('ex-start');
+    if (!btn) { console.warn('[DISTILL] ex-start button not found'); return; }
+    btn.onclick = async () => {
+      const relId = getCurrentRelId();
+      if (!relId) { setStatus('请先在首页选择一个联系人'); return; }
+      const nickname = (document.getElementById('ex-nickname') || {}).value || '';
+      const relationshipDesc = (document.getElementById('ex-relationship') || {}).value || '';
+      const tags = (document.getElementById('ex-tags') || {}).value || '';
+      if (!nickname.trim()) { setStatus('请填写她的昵称/代号'); return; }
+
+      // 收集有效材料：DB 由复选框控制；外部类型必须有非空路径
+      const useDb = document.getElementById('ex-use-db').checked;
+      const materials = [];
+      if (useDb) materials.push({type: 'DB', path: ''});
+      for (const row of materialsBox.children) {
+        const type = row.dataset.type;
+        const inp = row.querySelector('[data-path]');
+        const p = (inp && inp.value || '').trim();
+        if (p) materials.push({type, path: p});
+      }
+      if (materials.length === 0) {
+        setStatus('请勾选 RUI 数据库，或至少添加一个外部材料并填写路径');
+        return;
+      }
+
+      btn.disabled = true;
+      setStatus('正在蒸馏，4 阶段 LLM 调用中，约 60-120 秒...');
+      try {
+        const payload = {
+          relationshipId: relId,
+          nickname: nickname.trim(),
+          relationshipDesc: relationshipDesc.trim(),
+          personalityTags: tags.trim(),
+          materials
+        };
+        const resp = await fetch('http://127.0.0.1:18080/api/distill-ex', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const d = await resp.json();
+        console.log('[DISTILL] response=', d);
+        if (d.success) {
+          setStatus('成功！已生成前任 Skill: ' + d.slug + '（样本 ' + d.materialCount + ' 条）。请到 Skill 管理中选择。');
+        } else {
+          const errMsg = d.message || d.error || '未知错误';
+          setStatus('失败: ' + errMsg);
+          if (/未检测到 Python|python.*not found|no python/i.test(errMsg)) {
+            showPythonInstallPrompt();
+          }
+        }
+      } catch (e) {
+        console.error('[DISTILL] error', e);
+        setStatus('请求失败: ' + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    console.log('[DISTILL] ex-start bound, relId=' + getCurrentRelId());
+  }
+
+  function showPythonInstallPrompt() {
+    if (document.getElementById('python-install-modal')) return;
+    const mask = document.createElement('div');
+    mask.id = 'python-install-modal';
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    mask.innerHTML = `
+      <div style="background:#1e1b3a;border:1px solid rgba(139,92,246,0.4);border-radius:12px;padding:20px;max-width:340px;color:#e8e0ff;font-family:sans-serif;">
+        <div style="font-size:15px;font-weight:600;margin-bottom:10px;">需要安装 Python</div>
+        <div style="font-size:12px;line-height:1.6;color:#c8c2e0;margin-bottom:16px;">
+          解析微信导出文件需要 Python 运行环境。当前电脑未检测到可用的 Python，因此暂时无法解析该文件。安装完成后，可以重新尝试蒸馏。
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="py-install-cancel" style="padding:7px 14px;border:1px solid rgba(139,92,246,0.4);background:transparent;color:#a78bfa;border-radius:6px;cursor:pointer;font-size:12px;">取消</button>
+          <button id="py-install-go" style="padding:7px 14px;border:none;background:linear-gradient(135deg,#7c3aed,#6366f1);color:#fff;border-radius:6px;cursor:pointer;font-size:12px;">安装 Python</button>
+        </div>
+      </div>`;
+    document.body.appendChild(mask);
+    document.getElementById('py-install-cancel').onclick = () => mask.remove();
+    document.getElementById('py-install-go').onclick = () => {
+      const url = 'https://www.python.org/downloads/windows/';
+      try {
+        if (window.desktopBridge && typeof window.desktopBridge.openExternalUrl === 'function') {
+          window.desktopBridge.openExternalUrl(url);
+        } else {
+          window.open(url, '_blank');
+        }
+      } catch (e) {
+        console.error('[PY-INSTALL] open url failed', e);
+      }
+      mask.remove();
+    };
+    mask.addEventListener('click', (e) => { if (e.target === mask) mask.remove(); });
   }
 
   function bindCollectSettings() {

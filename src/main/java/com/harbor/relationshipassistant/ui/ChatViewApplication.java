@@ -120,6 +120,7 @@ public class ChatViewApplication extends Application {
             java.nio.file.Path skillsRoot = java.nio.file.Paths.get("skills");
             skillManager = new com.harbor.relationshipassistant.application.skill.SkillManager(
                     skillsRoot, new com.harbor.relationshipassistant.application.skill.DefaultSkillLoader());
+            skillManager.setEnablementStore(new com.harbor.relationshipassistant.application.skill.SkillEnablementStore(skillsRoot));
             skillWatcher = new com.harbor.relationshipassistant.application.skill.SkillWatcher(skillsRoot, skillManager);
             skillWatcher.start();
             skillManager.initialize();
@@ -176,7 +177,12 @@ public class ChatViewApplication extends Application {
             stage.setTitle("JEVE");
             // Wrap FXML root in a rounded frame so the whole window has soft corners.
             javafx.scene.layout.StackPane frame = new javafx.scene.layout.StackPane(root);
-            frame.setStyle("-fx-background-color: #F6F5F2; -fx-background-radius: 18; -fx-background-insets: 0;");
+            boolean testTransparent = Boolean.getBoolean("rui.testTransparent");
+            String frameStyle = testTransparent
+                ? "-fx-background-color: transparent; -fx-background-radius: 18; -fx-background-insets: 0;"
+                : "-fx-background-color: #F6F5F2; -fx-background-radius: 18; -fx-background-insets: 0;";
+            frame.setStyle(frameStyle);
+            log.info("[UI] frame style: {}", testTransparent ? "transparent (TEST)" : "#F6F5F2");
             javafx.scene.shape.Rectangle clip = new javafx.scene.shape.Rectangle();
             double r = 18;
             clip.setArcWidth(r * 2);

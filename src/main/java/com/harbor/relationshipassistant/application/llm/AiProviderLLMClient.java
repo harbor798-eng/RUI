@@ -28,8 +28,8 @@ public final class AiProviderLLMClient implements LLMClient {
         AIRequest aiReq = AIRequest.of(
                 request.getSystemPrompt(),
                 List.of(new AIRequest.Turn("user", request.getUserPrompt())));
-        // Phase 22: Detailed Analysis JSON 字段更多，给到 2000 tokens。
-        aiReq.setMaxTokens(2000);
+        // Detailed Analysis JSON fields can be long; 3000 prevents truncation of Chinese output.
+        aiReq.setMaxTokens(3000);
         aiReq.setTemperature(0.7);
         long t0 = System.currentTimeMillis();
         log.info("[LLM] execute provider={}", provider.getProviderName());
