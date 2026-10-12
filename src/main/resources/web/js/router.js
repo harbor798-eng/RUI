@@ -1,4 +1,6 @@
 (function (global) {
+  const BUILD_MARK = 'theme-clickdiag-20261012-c';
+  console.log('[ThemeDiag] router-build=' + BUILD_MARK + ' href=' + location.href);
   // Stage UI polish: faster mouse wheel scroll on main content
   document.addEventListener('wheel', function(e) {
     const container = e.target.closest('.page-content') || e.target.closest('#app');
@@ -71,15 +73,88 @@
   let quickReplyState = { generated: false, byStrategy: {} };
   let currentRelationshipId = null;
   let currentSkillName = '';
-  try { currentSkillName = localStorage.getItem('ruiActiveSkill') || ''; } catch(e) {}
+  try { currentSkillName = lsGet('ruiActiveSkill', ''); } catch(e) {}
 
   /* ===== Theme: Classic vs Desktop Glass ===== */
+  function diagLog(msg) {
+    try {
+      console.log('[Diag] ' + msg);
+      if (window.desktopBridge && window.desktopBridge.diagLog) {
+        window.desktopBridge.diagLog('web', msg);
+      }
+    } catch(e) {}
+  }
+  // Startup: confirm build and listener registration
+  window.addEventListener('DOMContentLoaded', () => {
+    diagLog('router-build=' + BUILD_MARK + ' href=' + location.href + ' readyState=' + document.readyState);
+    setTimeout(() => {
+      diagLog('listeners: clickDiag=' + !!window.__clickDiagBound + ' themeCard=' + !!window.__themeCardBound);
+      const cards = document.querySelectorAll('.theme-option-card');
+      diagLog('theme-option-card count=' + cards.length);
+      cards.forEach((c,i) => diagLog('card['+i+'] val=' + c.dataset.themeVal + ' class=' + c.className));
+    }, 500);
+  });
+  // ===== Global theme card click handler — registered once at IIFE load, independent of route =====
+  (function installGlobalThemeHandler() {
+    document.addEventListener('click', (e) => {
+      try {
+        const card = e.target.closest ? e.target.closest('.theme-option-card') : null;
+        if (!card) return;
+        const t = card.dataset.themeVal;
+        if (!t) return;
+        const before = document.documentElement.getAttribute('data-theme');
+        console.log('[ThemeDiag] GLOBAL card clicked t=' + t + ' before=' + before + ' target=' + e.target.tagName);
+        diagLog('GLOBAL card clicked t=' + t + ' before=' + before);
+        commitTheme(t);
+        applyTheme(t);
+        document.querySelectorAll('.theme-option-card').forEach(c => {
+          c.classList.toggle('active', c.dataset.themeVal === t);
+        });
+      } catch(err) {
+        console.warn('[ThemeDiag] global theme handler error: ' + err.message);
+      }
+    });
+    // Capture-phase diagnostic for ALL clicks
+    document.addEventListener('click', (e) => {
+      try {
+        const card = e.target.closest ? e.target.closest('.theme-option-card') : null;
+        console.log('[ThemeDiag] capture click target=' + e.target.tagName + ' card=' + (card ? card.dataset.themeVal : 'NONE'));
+      } catch(err) {}
+    }, true);
+    console.log('[ThemeDiag] global theme handler installed at IIFE load, mark=' + BUILD_MARK);
+    diagLog('global theme handler installed, mark=' + BUILD_MARK);
+  })();
+
   function getTheme() {
-    try { return localStorage.getItem('ruiTheme') || 'classic'; } catch(e) { return 'classic'; }
+    // Java properties file is the authoritative source.
+    if (window.desktopBridge && window.desktopBridge.loadTheme) {
+      try {
+        const t = window.desktopBridge.loadTheme();
+        if (t === 'classic' || t === 'desktop-glass') {
+          try { localStorage.setItem('ruiTheme', t); } catch(e2) {}
+          return t;
+        }
+      } catch(e) {}
+    }
+    // Bridge not ready: fall back to localStorage (migration source).
+    try {
+      const local = localStorage.getItem('ruiTheme');
+      if (local === 'classic' || local === 'desktop-glass') return local;
+    } catch(e) {}
+    return 'classic';
+  }
+  function commitTheme(t) {
+    if (t !== 'classic' && t !== 'desktop-glass') t = 'classic';
+    try { localStorage.setItem('ruiTheme', t); } catch(e) {}
+    if (window.desktopBridge && window.desktopBridge.saveTheme) {
+      try { window.desktopBridge.saveTheme(t); } catch(e2) {}
+    }
   }
   function applyTheme(theme) {
+    const before = document.documentElement.getAttribute('data-theme');
     document.documentElement.setAttribute('data-theme', theme);
     const glass = theme === 'desktop-glass';
+    diagLog('applyTheme: before=' + before + ' after=' + theme);
     // Use setProperty with 'important' to override liquid-glass.css !important rules.
     if (glass) {
       document.documentElement.style.setProperty('background', 'transparent', 'important');
@@ -129,7 +204,16 @@
     themeRetries++;
     if (window.desktopBridge && window.desktopBridge.setGlassTheme) {
       clearInterval(themeTimer);
-      applyTheme(getTheme());
+      // Bridge ready: resolve authoritative theme. If Java has no record but localStorage does, migrate.
+      let javaTheme = null;
+      try { javaTheme = window.desktopBridge.loadTheme(); } catch(e) {}
+      if (javaTheme === 'classic' || javaTheme === 'desktop-glass') {
+        applyTheme(javaTheme);
+      } else {
+        const local = getTheme(); // falls back to localStorage
+        commitTheme(local);       // migrate to Java
+        applyTheme(local);
+      }
     } else if (themeRetries > 50) {
       clearInterval(themeTimer);
     }
@@ -147,7 +231,7 @@
     clearTimeout(scrollbarTimers.get(el));
     scrollbarTimers.set(el, setTimeout(() => el.classList.remove('scrollbar-active'), 800));
   }
-  function updateCustomScrollbar(scrollEl, sbId, thumbId) {
+  function updateCustomScrollbar(scrollEl, sbId, thumbId, isUserScroll) {
     if (!scrollEl) return;
     const sb = document.getElementById(sbId);
     const thumb = document.getElementById(thumbId);
@@ -161,16 +245,21 @@
     thumb.style.height = thumbH + 'px';
     thumb.style.top = thumbT + 'px';
     sb.classList.add('visible');
-    clearTimeout(scrollbarTimers.get(sb));
-    scrollbarTimers.set(sb, setTimeout(() => sb.classList.remove('visible'), 800));
+    // Only schedule auto-hide when the update is triggered by actual user scroll.
+    // Programmatic rAF refreshes (polling, render) should not reset the hide timer,
+    // otherwise the thumb flickers between visible/hidden as polls fire.
+    if (isUserScroll) {
+      clearTimeout(scrollbarTimers.get(sb));
+      scrollbarTimers.set(sb, setTimeout(() => sb.classList.remove('visible'), 800));
+    }
   }
   function updateScrollThumb(list) {
-    updateCustomScrollbar(list, 'ch-scrollbar', 'ch-thumb');
+    updateCustomScrollbar(list, 'ch-scrollbar', 'ch-thumb', true);
   }
   function updateMainScrollbar() {
     const main = document.getElementById('main-content');
     if (main && main.classList.contains('no-scroll')) return;
-    updateCustomScrollbar(main, 'main-scrollbar', 'main-thumb');
+    updateCustomScrollbar(main, 'main-scrollbar', 'main-thumb', true);
   }
   function bindHeaderScroll(scrollEl) {
     const header = document.getElementById('jeve-header');
@@ -408,7 +497,7 @@
 
   function renderThemeSettings() {
     const cur = getTheme();
-    return `<div class="settings-list" style="padding:12px;">
+    const html = `<div class="settings-list" style="padding:12px;">
       <div class="qr-card theme-option-card ${cur==='classic'?'active':''}" data-theme-val="classic" style="cursor:pointer;padding:14px;">
         <h3 style="margin:0 0 4px;font-size:14px;">Classic</h3>
         <p class="muted" style="margin:0;">暖白稳定主题</p>
@@ -418,11 +507,23 @@
         <p class="muted" style="margin:0;">紫色玻璃质感，桌面毛玻璃效果</p>
       </div>
     </div>`;
+    setTimeout(() => {
+      const cards = document.querySelectorAll('.theme-option-card');
+      diagLog('renderThemeSettings: cards=' + cards.length + ' cur=' + cur);
+      cards.forEach((c,i) => {
+        const r = c.getBoundingClientRect();
+        diagLog('card['+i+'] val=' + c.dataset.themeVal + ' rect=' + Math.round(r.left)+','+Math.round(r.top)+' '+Math.round(r.width)+'x'+Math.round(r.height) + ' visible=' + (r.width>0&&r.height>0));
+        const cx = r.left + r.width/2, cy = r.top + r.height/2;
+        const hit = document.elementFromPoint(cx, cy);
+        diagLog('card['+i+'] elementFromPoint=' + (hit ? hit.tagName+'.'+(hit.className||'') : 'NULL'));
+      });
+    }, 100);
+    return html;
   }
 
   function renderDistillIdentity() {
     const cards = [
-      { id: 'ex', title: '前任', desc: '基于聊天记录蒸馏前任的说话风格与共同记忆', enabled: true },
+      { id: 'ex', title: '前任', desc: '前任 VS 前任，王牌对王牌', enabled: true },
       { id: 'self', title: '自己', desc: '蒸馏本人的说话风格', enabled: false },
       { id: 'generic', title: '通用', desc: '通用人物画像 Skill', enabled: false }
     ];
@@ -478,19 +579,19 @@
         </div>
         <div style="margin-top:12px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <span style="font-size:12px;color:#a78bfa;font-weight:600;">材料来源</span>
-            <span style="font-size:10px;color:#888;">支持多选，按顺序拼接</span>
+            <span style="font-size:12px;color:var(--jeve-accent);font-weight:600;">材料来源</span>
+            <span style="font-size:10px;color:var(--jeve-text-muted);">支持多选，按顺序拼接</span>
           </div>
-          <label style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.25);font-size:12px;color:var(--jeve-text,#eee);cursor:pointer;margin-bottom:6px;">
-            <input type="checkbox" id="ex-use-db" checked style="accent-color:#7c3aed;">
-            <span>使用 RUI 数据库聊天记录<span style="color:#888;font-size:10px;">（当前选中联系人）</span></span>
+          <label style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;background:var(--jeve-accent-soft);border:1px solid var(--jeve-border);font-size:12px;color:var(--jeve-text-primary);cursor:pointer;margin-bottom:6px;">
+            <input type="checkbox" id="ex-use-db" checked style="accent-color:var(--jeve-accent);">
+            <span>使用 RUI 数据库聊天记录<span style="color:var(--jeve-text-muted);font-size:10px;">（当前选中联系人）</span></span>
           </label>
           <div id="ex-materials" style="display:flex;flex-direction:column;gap:6px;"></div>
           <div style="display:flex;gap:6px;margin-top:6px;position:relative;">
             <div id="ex-add-type-wrap" style="flex:1;position:relative;">
               <button type="button" id="ex-add-type" data-value="WECHAT_FILE"
-                style="width:100%;padding:6px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(139,92,246,0.3);color:var(--jeve-text,#eee);font-size:12px;text-align:left;cursor:pointer;">微信导出文件</button>
-              <div id="ex-add-type-panel" style="display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;background:rgba(32,27,65,0.96);border:1px solid rgba(167,139,250,0.4);border-radius:8px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden;">
+                style="width:100%;padding:6px;border-radius:6px;background:var(--jeve-surface-secondary);border:1px solid var(--jeve-border);color:var(--jeve-text-primary);font-size:12px;text-align:left;cursor:pointer;">微信导出文件</button>
+              <div id="ex-add-type-panel" class="ex-dd-panel" style="display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;border:1px solid var(--jeve-border);border-radius:8px;z-index:50;box-shadow:var(--lg-shadow,0 8px 24px rgba(0,0,0,0.2));overflow:hidden;background:var(--jeve-surface-strong,var(--jeve-surface));color:var(--jeve-text-primary);">
                 <div data-val="WECHAT_FILE" class="ex-dd-item">微信导出文件</div>
                 <div data-val="QQ_FILE" class="ex-dd-item">QQ 导出文件</div>
                 <div data-val="SMS_FILE" class="ex-dd-item">短信导出（需 Python）</div>
@@ -498,9 +599,9 @@
                 <div data-val="PHOTO_DIR" class="ex-dd-item">照片目录（需 Python）</div>
               </div>
             </div>
-            <button id="ex-add" style="flex-shrink:0;padding:6px 12px;font-size:12px;border:1px solid rgba(139,92,246,0.4);background:rgba(139,92,246,0.1);color:#a78bfa;border-radius:6px;cursor:pointer;">添加</button>
+            <button id="ex-add" style="flex-shrink:0;padding:6px 12px;font-size:12px;border:1px solid var(--jeve-accent);background:var(--jeve-accent-soft);color:var(--jeve-accent);border-radius:6px;cursor:pointer;">添加</button>
           </div>
-          <div class="muted" style="font-size:10px;margin-top:4px;color:#888;">注：短信/社交媒体/照片目录需本机 Python。iMessage 仅支持 macOS，未接入。</div>
+          <div class="muted" style="font-size:10px;margin-top:4px;color:var(--jeve-text-muted);">注：短信/社交媒体/照片目录需本机 Python。iMessage 仅支持 macOS，未接入。</div>
         </div>
         <button id="ex-start" style="margin-top:12px;padding:10px;border:none;border-radius:8px;background:linear-gradient(135deg,#7c3aed,#6366f1);color:#fff;cursor:pointer;font-size:13px;width:100%;">蒸馏前任（约 60-120 秒）</button>
         <div id="distill-status" class="muted" style="margin-top:10px;font-size:12px;"></div>
@@ -610,9 +711,6 @@
 
   function renderChatHistory() {
     return `<div class="chat-page">
-      <div id="ch-toolbar" class="qr-toolbar" style="padding:8px 12px;">
-        <span id="ch-resync-status" class="muted"></span>
-      </div>
       <div id="ch-status" class="page-placeholder">正在加载…</div>
       <div class="chat-scroll-viewport">
         <div id="ch-list" class="chat-stream"></div>
@@ -936,7 +1034,7 @@
       loadChatHistory();
       // Auto-refresh a few times if a recent import was triggered (background sync still writing)
       try {
-        const lastImport = parseInt(localStorage.getItem('ruiLastImportAt') || '0', 10);
+        const lastImport = parseInt(lsGet('ruiLastImportAt', '0'), 10);
         if (lastImport && (Date.now() - lastImport) < 15000) {
           [3000, 6000, 10000].forEach(d => setTimeout(() => {
             if (window.__jevePage === 'chat-history') loadChatHistory();
@@ -974,7 +1072,14 @@
         const oldest = msgs[0];
         chState.beforeTime = oldest.time; chState.beforeId = oldest.id;
       }
-      requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; updateScrollThumb(list); });
+      requestAnimationFrame(() => {
+        if (list.scrollHeight <= list.clientHeight) {
+          list.scrollTop = 0;
+        } else {
+          list.scrollTop = list.scrollHeight;
+        }
+        updateScrollThumb(list);
+      });
       bindChatActions(list);
       console.log('[HeaderDebug] chat-history header fixed');
       list.onscroll = async () => {
@@ -1041,6 +1146,29 @@
   let editTargetId = null;
   document.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    try {
+      const dlog = (m) => { try { window.desktopBridge && window.desktopBridge.diagTheme(m); } catch(_){} };
+      const t = e.target;
+      const tDesc = t ? (t.tagName.toLowerCase() + (t.id ? '#'+t.id : '') + (t.className && typeof t.className==='string' ? '.'+t.className.split(' ')[0] : '')) : 'null';
+      const stack = (function(){ let n=t, out=[]; while(n && out.length<6){ out.push(n.tagName.toLowerCase()+(n.id?'#'+n.id:'')+(n.className&&typeof n.className==='string'?'.'+n.className.split(' ')[0]:'')); n=n.parentElement; } return out.join(' < '); })();
+      const hit = document.elementFromPoint(e.clientX, e.clientY);
+      const hitDesc = hit ? (hit.tagName.toLowerCase()+(hit.id?'#'+hit.id:'')+(hit.className&&typeof hit.className==='string'?'.'+hit.className.split(' ')[0]:'')) : 'null';
+      dlog('[CtxMenu] enter x='+e.clientX+' y='+e.clientY+' target='+tDesc);
+      dlog('[CtxMenu] stack='+stack);
+      dlog('[CtxMenu] elementFromPoint='+hitDesc);
+      const menu = document.getElementById('ctx-menu');
+      if (e.target.closest && e.target.closest('#ctx-menu')) { dlog('[CtxMenu] return: inside #ctx-menu'); return; }
+      const bubble = e.target.closest ? e.target.closest('.bubble') : null;
+      dlog('[CtxMenu] bubble=' + (bubble ? bubble.tagName+'.'+bubble.className : 'null'));
+      if (!bubble) { dlog('[CtxMenu] return: no bubble, closeCtxMenu'); closeCtxMenu(); return; }
+      const row = bubble.closest('.bubble-row');
+      ctxTargetId = row ? row.dataset.id : null;
+      dlog('[CtxMenu] row dataset.id=' + ctxTargetId);
+      const list = document.getElementById('ch-list');
+      if (list) { dlog('[CtxMenu] ch-list scrollTop='+list.scrollTop+' scrollHeight='+list.scrollHeight+' clientHeight='+list.clientHeight); }
+      const br = bubble.getBoundingClientRect();
+      dlog('[CtxMenu] bubble rect=('+Math.round(br.top)+','+Math.round(br.left)+' '+Math.round(br.width)+'x'+Math.round(br.height)+')');
+    } catch(err) { try { window.desktopBridge && window.desktopBridge.diagTheme('[CtxMenu] error: '+err.message); } catch(_){} }
     const menu = document.getElementById('ctx-menu');
     if (e.target.closest && e.target.closest('#ctx-menu')) return;
     const bubble = e.target.closest ? e.target.closest('.bubble') : null;
@@ -1257,15 +1385,30 @@
     await refreshChatPreview();
   }
 
+  // Safe localStorage accessor — JavaFX WebView may return null/throw during early init.
+  function lsGet(key, def) {
+    try {
+      if (typeof localStorage === 'undefined' || localStorage === null) return def;
+      const v = localStorage.getItem(key);
+      return v === null || v === undefined ? def : v;
+    } catch(e) { return def; }
+  }
+
   async function refreshChatPreview() {
     const list = document.getElementById('chat-preview-list');
-    if (!list) return;
-    list.onscroll = () => updateCustomScrollbar(list, 'cp-scrollbar', 'cp-thumb');
+    if (!list) { diagLog('chatPreview: list not mounted'); return; }
+    list.onscroll = () => updateCustomScrollbar(list, 'cp-scrollbar', 'cp-thumb', true);
     try {
-      const ctxSize = parseInt(localStorage.getItem('aiContextSize') || '10', 10);
+      const ctxSize = parseInt(lsGet('aiContextSize', '10'), 10);
       const res = await fetch('http://127.0.0.1:18080/api/chat-history?size=' + ctxSize);
+      diagLog('chatPreview: HTTP ' + res.status);
+      if (!res.ok) {
+        diagLog('chatPreview: non-ok status ' + res.status);
+        return;
+      }
       const d = await res.json();
       const msgs = (d.messages || []).slice().reverse();
+      diagLog('chatPreview: msgs=' + msgs.length);
       const sig = msgs.length + '|' + (msgs[msgs.length-1] ? msgs[msgs.length-1].id : 0);
       const nearBottom = (list.scrollHeight - list.scrollTop - list.clientHeight) < 30;
       if (sig !== chatPreviewLastSig) {
@@ -1275,12 +1418,12 @@
           const who = (sp === 'ME' || sp === 'SELF') ? '我' : '对方';
           return `<div class="chat-preview-msg"><span class="chat-preview-who">${who}：</span>${escapeHtml(m.content || '')}</div>`;
         }).join('');
+        diagLog('chatPreview: rendered children=' + list.children.length + ' rect=' + list.offsetWidth + 'x' + list.offsetHeight);
         if (nearBottom) requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
       }
-      requestAnimationFrame(() => updateCustomScrollbar(list, 'cp-scrollbar', 'cp-thumb'));
+      requestAnimationFrame(() => updateCustomScrollbar(list, 'cp-scrollbar', 'cp-thumb', false));
     } catch (e) {
-      // silently skip poll errors; don't wipe existing messages
-      console.warn('[chatPreview] refresh failed', e);
+      diagLog('chatPreview: error ' + (e && e.message ? e.message : e));
     }
   }
   function renderQuickCards(state) {
@@ -1739,8 +1882,8 @@
       };
       // Scrollbar
       const kdList = document.getElementById('kd-list');
-      kdList.onscroll = () => updateCustomScrollbar(kdList, 'kd-scrollbar', 'kd-thumb');
-      requestAnimationFrame(() => updateCustomScrollbar(kdList, 'kd-scrollbar', 'kd-thumb'));
+      kdList.onscroll = () => updateCustomScrollbar(kdList, 'kd-scrollbar', 'kd-thumb', true);
+      requestAnimationFrame(() => updateCustomScrollbar(kdList, 'kd-scrollbar', 'kd-thumb', false));
     }
 
     ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
@@ -1895,18 +2038,7 @@
   global.getCurrentRelationshipId = () => currentRelationshipId;
 })(window);
   function bindSettings() {
-    document.querySelectorAll('.theme-option-card').forEach(card => {
-      card.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const t = card.dataset.themeVal;
-        try { localStorage.setItem('ruiTheme', t); } catch(e2) {}
-        applyTheme(t);
-        document.querySelectorAll('.theme-option-card').forEach(c => {
-          c.classList.toggle('active', c.dataset.themeVal === t);
-        });
-      };
-    });
+    // Theme card click is handled by the global IIFE-installed handler above.
     const el = document.getElementById('settings-profile');
     if (el) el.onclick = () => {
       console.log('[AIProfileUI] open-profile');
@@ -1921,15 +2053,71 @@
     if (about) about.onclick = () => {
       const ov = document.createElement('div');
       ov.className = 'rui-glass-overlay';
-      ov.innerHTML = '<div class="rui-glass-dialog">' +
-        '<h3 style="margin:0 0 12px;font-size:15px;font-weight:600;">关于 RUI</h3>' +
-        '<p style="font-size:13px;color:#555;line-height:1.6;margin:0 0 8px;">RUI — Relationship AI Assistant</p>' +
-        '<p style="font-size:12px;color:#999;margin:0 0 16px;">Version: Development</p>' +
-        '<div style="display:flex;justify-content:flex-end;"><button class="primary" id="about-close">关闭</button></div>' +
+      ov.innerHTML =
+        '<div class="rui-glass-dialog about-dialog" style="max-width:440px;width:440px;max-height:80vh;border-radius:12px;padding:16px;display:flex;flex-direction:column;position:relative;">' +
+        '<h3 class="about-title" style="margin:0 0 10px;font-size:16px;font-weight:600;flex-shrink:0;">关于 RUI</h3>' +
+        '<div style="position:relative;flex:1;min-height:0;overflow:hidden;">' +
+        '<div id="about-scroll" style="height:100%;overflow-y:auto;overflow-x:hidden;width:calc(100% + 16px);padding-right:16px;box-sizing:border-box;scrollbar-width:none;-ms-overflow-style:none;">' +
+        '<style>#about-scroll::-webkit-scrollbar,#about-license-view::-webkit-scrollbar{width:0;height:0;display:none;}</style>' +
+        '<p class="about-body" style="font-size:13px;line-height:1.6;margin:0 0 4px;">RUI — Relationship AI Assistant</p>' +
+        '<p class="about-sub" style="font-size:12px;margin:0 0 14px;">Version: Development</p>' +
+        '<div style="border-top:1px solid rgba(168,148,220,0.25);padding-top:10px;margin-bottom:10px;">' +
+        '<h4 class="about-comp" style="margin:0 0 8px;font-size:12px;font-weight:600;">开源组件声明</h4>' +
+        '<div class="about-body" style="font-size:12px;line-height:1.8;">' +
+        '<div style="margin-bottom:10px;">' +
+        '<div class="about-comp" style="font-weight:600;">ex-skill <span class="about-sub" style="font-weight:400;">(MIT, perkfly)</span></div>' +
+        '<a href="#" data-license="ex-skill-MIT.txt" class="about-link" style="text-decoration:none;">查看 MIT 许可证</a>' +
+        '</div>' +
+        '<div style="margin-bottom:10px;">' +
+        '<div class="about-comp" style="font-weight:600;">wechatauto-replica <span class="about-sub" style="font-weight:400;">(Apache 2.0, fanyuantaier, v1.2.6.1)</span></div>' +
+        '<a href="#" data-license="wechatauto-Apache2.0.txt" class="about-link" style="text-decoration:none;">查看 Apache 2.0 许可证</a>' +
+        '</div>' +
+        '<div style="margin-bottom:6px;">' +
+        '<div class="about-comp" style="font-weight:600;">其他运行时依赖</div>' +
+        '<a href="#" data-license="THIRD-PARTY-NOTICES.txt" class="about-link" style="text-decoration:none;">查看完整声明列表</a>' +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '<div id="about-license-wrap" class="about-license-box" style="display:none;position:relative;margin-bottom:10px;border-radius:6px;height:220px;overflow:hidden;">' +
+        '<pre id="about-license-view" style="height:100%;width:calc(100% + 16px);overflow-y:auto;overflow-x:hidden;margin:0;padding:10px 26px 10px 10px;font-size:11px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;font-family:inherit;box-sizing:border-box;scrollbar-width:none;-ms-overflow-style:none;"></pre>' +
+        '<div id="about-license-scrollbar" class="custom-scrollbar" style="right:2px;top:0;bottom:0;"><div id="about-license-thumb" class="custom-scrollbar-thumb"></div></div>' +
+        '</div>' +
+        '</div>' +
+        '<div id="about-scrollbar" class="custom-scrollbar" style="right:6px;top:50px;bottom:50px;"><div id="about-thumb" class="custom-scrollbar-thumb"></div></div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;margin-top:10px;">' +
+        '<button class="primary" id="about-close">关闭</button>' +
+        '</div>' +
         '</div>';
       document.body.appendChild(ov);
       ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+      // Also close when clicking the backdrop (any element that is not the dialog itself).
+      ov.addEventListener('mousedown', (e) => {
+        if (!e.target.closest('.about-dialog')) ov.remove();
+      });
       document.getElementById('about-close').onclick = () => ov.remove();
+      const outer = ov.querySelector('#about-scroll');
+      outer.onscroll = () => updateCustomScrollbar(outer, 'about-scrollbar', 'about-thumb', true);
+      requestAnimationFrame(() => updateCustomScrollbar(outer, 'about-scrollbar', 'about-thumb', false));
+      ov.querySelectorAll('a[data-license]').forEach(a => {
+        a.onclick = (e) => {
+          e.preventDefault();
+          const wrap = ov.querySelector('#about-license-wrap');
+          const view = ov.querySelector('#about-license-view');
+          wrap.style.display = 'block';
+          view.textContent = '加载中…';
+          fetch('licenses/' + a.dataset.license)
+            .then(r => r.text())
+            .then(t => {
+              view.textContent = t;
+              view.scrollTop = 0;
+              requestAnimationFrame(() => {
+                updateCustomScrollbar(view, 'about-license-scrollbar', 'about-license-thumb', false);
+                updateCustomScrollbar(outer, 'about-scrollbar', 'about-thumb', false);
+              });
+            })
+            .catch(() => { view.textContent = '无法加载许可证文件'; });
+        };
+      });
     };
   }
 
@@ -1971,10 +2159,10 @@
       row.dataset.type = type;
       row.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:nowrap;';
       row.innerHTML = `
-        <span style="font-size:11px;color:#a78bfa;min-width:80px;flex-shrink:0;">${meta.label}</span>
+        <span style="font-size:11px;color:var(--jeve-accent);min-width:80px;flex-shrink:0;">${meta.label}</span>
         <input data-path placeholder="${meta.placeholder || ''}"
-          style="flex:1;min-width:0;padding:6px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(139,92,246,0.3);color:var(--jeve-text,#eee);font-size:11px;">
-        <button data-rm style="flex-shrink:0;padding:4px 8px;font-size:11px;background:transparent;border:1px solid rgba(255,100,100,0.4);color:#ff8888;border-radius:4px;cursor:pointer;">×</button>`;
+          style="flex:1;min-width:0;padding:6px;border-radius:6px;background:var(--jeve-surface-secondary);border:1px solid var(--jeve-border);color:var(--jeve-text-primary);font-size:11px;">
+        <button data-rm style="flex-shrink:0;padding:4px 8px;font-size:11px;background:transparent;border:1px solid rgba(255,100,100,0.4);color:#dc2626;border-radius:4px;cursor:pointer;">×</button>`;
       row.querySelector('[data-rm]').onclick = () => row.remove();
       materialsBox.appendChild(row);
     }
@@ -2228,7 +2416,7 @@
   function renderContactSearch(conCard, contacts) {
     conCard.innerHTML =
       '<div class="wr-section-title">选择联系人</div>' +
-      '<input id="wr-contact-search" type="text" placeholder="按备注搜索联系人…" style="width:100%;padding:8px 10px;margin:6px 0;border:1px solid rgba(96,76,199,0.25);border-radius:8px;background:rgba(255,255,255,0.6);box-sizing:border-box;font-size:13px"/>' +
+      '<input id="wr-contact-search" type="text" placeholder="搜索联系人昵称或微信号…" style="width:100%;padding:10px 12px;margin:6px 0 10px;border:1.5px solid rgba(96,76,199,0.45);border-radius:8px;background:#ffffff;box-sizing:border-box;font-size:13px;color:#222;outline:none;"/>' +
       '<div class="wi-viewport" style="position:relative;height:260px;overflow:hidden;border-radius:0 0 10px 10px"><div id="wr-contact-list" class="wr-contact-list">' +
       contacts.map(c => {
         const display = c.remark || c.nickname || c.wxid;
@@ -2239,8 +2427,8 @@
     requestAnimationFrame(() => {
       const lst = document.getElementById('wr-contact-list');
       if (lst) {
-        lst.onscroll = () => updateCustomScrollbar(lst, 'wr-scrollbar', 'wr-thumb');
-        setTimeout(() => updateCustomScrollbar(lst, 'wr-scrollbar', 'wr-thumb'), 50);
+        lst.onscroll = () => updateCustomScrollbar(lst, 'wr-scrollbar', 'wr-thumb', true);
+        setTimeout(() => updateCustomScrollbar(lst, 'wr-scrollbar', 'wr-thumb', false), 50);
       }
     });
     const search = document.getElementById('wr-contact-search');
@@ -2259,7 +2447,7 @@
         const empty = document.getElementById('wr-contact-empty');
         if (empty) empty.style.display = visible === 0 ? '' : 'none';
         const lst = document.getElementById('wr-contact-list');
-        if (lst) setTimeout(() => updateCustomScrollbar(lst, 'wr-scrollbar', 'wr-thumb'), 30);
+        if (lst) setTimeout(() => updateCustomScrollbar(lst, 'wr-scrollbar', 'wr-thumb', false), 30);
       };
     }
     conCard.querySelectorAll('.wr-contact').forEach(el => {
@@ -2410,8 +2598,8 @@
       document.getElementById('wi-run').disabled = false;
       status.textContent = '已选择：' + b.querySelector('b').textContent;
     });
-    list.onscroll = () => updateCustomScrollbar(list, 'wi-scrollbar', 'wi-thumb');
-    requestAnimationFrame(() => updateCustomScrollbar(list, 'wi-scrollbar', 'wi-thumb'));
+    list.onscroll = () => updateCustomScrollbar(list, 'wi-scrollbar', 'wi-thumb', true);
+    requestAnimationFrame(() => updateCustomScrollbar(list, 'wi-scrollbar', 'wi-thumb', false));
   }
 
   async function wiFindByAlias() {
@@ -2519,17 +2707,88 @@
   function bindAiConfig() {
     console.log('[AIConfigUI] open');
     const status = document.getElementById('ai-config-status');
-    document.getElementById('ai-save').onclick = () => {
-      const provider = document.getElementById('ai-provider').value;
-      const baseUrl = document.getElementById('ai-base-url').value;
-      const model = document.getElementById('ai-model').value;
-      const apiKey = document.getElementById('ai-api-key').value;
-      console.log('[AIConfigUI] save provider=', provider, 'model=', model);
-      status.textContent = '配置已保存（TODO：后端 Web API 未暴露，仅前端记录）';
+    const testBtn = document.getElementById('ai-test');
+    const saveBtn = document.getElementById('ai-save');
+    const keyInput = document.getElementById('ai-api-key');
+    const keyStatus = document.getElementById('ai-key-status');
+
+    // Load existing config
+    fetch('http://127.0.0.1:18080/api/ai/config')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && d.configured) {
+          document.getElementById('ai-base-url').value = d.baseUrl || 'https://api.deepseek.com';
+          if (d.model) {
+            const dd = document.getElementById('ai-model');
+            dd.dataset.value = d.model;
+            dd.querySelector('.jeve-dropdown-trigger span').textContent = d.model;
+            dd.querySelectorAll('.jeve-dropdown-option').forEach(o => o.classList.toggle('selected', o.dataset.value === d.model));
+          }
+          if (d.hasKey) {
+            keyStatus.textContent = '已配置：' + (d.maskedKey || '');
+            keyInput.placeholder = '已配置，留空则保持不变';
+          }
+          status.textContent = '';
+        } else {
+          status.textContent = '尚未配置 AI 服务';
+        }
+      })
+      .catch(e => { status.textContent = '读取配置失败：' + e.message; });
+
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true;
+      status.textContent = '保存中…';
+      try {
+        const body = {
+          provider: 'DEEPSEEK',
+          baseUrl: document.getElementById('ai-base-url').value,
+          model: document.getElementById('ai-model').dataset.value || 'deepseek-chat',
+          apiKey: keyInput.value
+        };
+        const r = await fetch('http://127.0.0.1:18080/api/ai/config', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (d.success) {
+          status.textContent = '配置已保存';
+          keyInput.value = '';
+          if (d.maskedKey) keyStatus.textContent = '已配置：' + d.maskedKey;
+        } else {
+          status.textContent = '保存失败：' + (d.error || '未知错误');
+        }
+      } catch (e) {
+        status.textContent = '保存失败：' + e.message;
+      } finally {
+        saveBtn.disabled = false;
+      }
     };
-    document.getElementById('ai-test').onclick = () => {
-      console.log('[AIConfigUI] test-start');
-      status.textContent = '测试中……（TODO：后端 Web API 未暴露）';
+
+    testBtn.onclick = async () => {
+      testBtn.disabled = true;
+      status.textContent = '测试中…';
+      try {
+        const body = {
+          provider: 'DEEPSEEK',
+          baseUrl: document.getElementById('ai-base-url').value,
+          model: document.getElementById('ai-model').dataset.value || 'deepseek-chat',
+          apiKey: keyInput.value
+        };
+        const r = await fetch('http://127.0.0.1:18080/api/ai/test', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (d.success) {
+          status.textContent = '连接成功';
+        } else {
+          status.textContent = '连接失败：' + (d.error || '未知错误');
+        }
+      } catch (e) {
+        status.textContent = '连接失败：' + e.message;
+      } finally {
+        testBtn.disabled = false;
+      }
     };
   }
   /* ===== JEVE Dropdown controller ===== */
@@ -2571,9 +2830,9 @@
             const thumb = sb ? sb.querySelector('.custom-scrollbar-thumb') : null;
             if (sb && thumb) {
               const sbId = sb.id, thumbId = thumb.id;
-              updateCustomScrollbar(inner, sbId, thumbId);
+              updateCustomScrollbar(inner, sbId, thumbId, false);
               if (!inner._scrollBound) {
-                inner.addEventListener('scroll', () => updateCustomScrollbar(inner, sbId, thumbId));
+                inner.addEventListener('scroll', () => updateCustomScrollbar(inner, sbId, thumbId, true));
                 inner._scrollBound = true;
               }
             }

@@ -46,6 +46,7 @@ public class ProfileHttpServer {
     private volatile com.harbor.relationshipassistant.application.wechat.WechatImportService wechatImportService;
     private volatile com.harbor.relationshipassistant.application.distill.DistillationService distillationService;
     private volatile com.harbor.relationshipassistant.application.distill.ExDistillService exDistillService;
+    private volatile com.harbor.relationshipassistant.application.ai.AiConfigService aiConfigService;
 
     // Phase 1: DatabaseMessageSource config
     private volatile String dbUrl, dbUser, dbPass;
@@ -111,6 +112,9 @@ public class ProfileHttpServer {
     public void setSystemHostPlanner(com.harbor.relationshipassistant.application.systemhost.SystemHostPlanner p) { this.systemHostPlanner = p; }
     public void setDistillationService(com.harbor.relationshipassistant.application.distill.DistillationService s) { this.distillationService = s; }
     public void setExDistillService(com.harbor.relationshipassistant.application.distill.ExDistillService s) { this.exDistillService = s; }
+    public void setAiConfigService(com.harbor.relationshipassistant.application.ai.AiConfigService s) { this.aiConfigService = s; }
+    private volatile Runnable onAiConfigChanged;
+    public void setOnAiConfigChanged(Runnable r) { this.onAiConfigChanged = r; }
 
     public void setAnalysisApplicationService(
             com.harbor.relationshipassistant.application.analysis.AnalysisApplicationService app,
@@ -129,6 +133,43 @@ public class ProfileHttpServer {
     public void setChatMessageRepository(com.harbor.relationshipassistant.infrastructure.persistence.ChatMessageRepository r) { this.chatMessageRepository = r; }
     public void setContactName(String name) { if (name != null && !name.isBlank()) this.contactName = name; }
 
+    private com.harbor.relationshipassistant.infrastructure.persistence.DataSourceFactory dsFactory;
+    public void setDataSourceFactory(com.harbor.relationshipassistant.infrastructure.persistence.DataSourceFactory ds) { this.dsFactory = ds; }
+
+    private static final String CFG_ACTIVE_REL = "active_relationship_id";
+
+    private void persistActiveRel(long id) {
+        if (dsFactory == null) return;
+        try (java.sql.Connection c = dsFactory.newConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement(
+                 "INSERT OR REPLACE INTO app_config(config_key, config_value, updated_at) VALUES(?,?,?)")) {
+            ps.setString(1, CFG_ACTIVE_REL);
+            ps.setString(2, Long.toString(id));
+            ps.setObject(3, java.time.LocalDateTime.now());
+            ps.executeUpdate();
+        } catch (Exception e) {
+            log.warn("[PROFILE_HTTP] persist active rel failed: {}", e.toString());
+        }
+    }
+
+    private long restoreActiveRel(long fallback) {
+        if (dsFactory == null) return fallback;
+        try (java.sql.Connection c = dsFactory.newConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement("SELECT config_value FROM app_config WHERE config_key=?")) {
+            ps.setString(1, CFG_ACTIVE_REL);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    long v = Long.parseLong(rs.getString(1));
+                    log.info("[PROFILE_HTTP] restored active_relationship_id={}", v);
+                    return v;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[PROFILE_HTTP] restore active rel failed: {}", e.toString());
+        }
+        return fallback;
+    }
+
     public ProfileHttpServer(ProfileService profileService, long relationshipId, int port, Path webDir) {
         this.profileService = profileService;
         this.relationshipId = relationshipId;
@@ -137,6 +178,11 @@ public class ProfileHttpServer {
     }
 
     public void start() throws IOException {
+        long restored = restoreActiveRel(this.relationshipId);
+        if (restored != this.relationshipId) {
+            log.info("[PROFILE_HTTP] using restored relationshipId={} (was {})", restored, this.relationshipId);
+            this.relationshipId = restored;
+        }
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         server.createContext("/api/", this::handleApi);
         server.createContext("/", this::handleStatic);
@@ -154,6 +200,7 @@ public class ProfileHttpServer {
 
     public void setRelationshipId(long relationshipId) {
         this.relationshipId = relationshipId;
+        persistActiveRel(relationshipId);
         log.info("[PROFILE_HTTP] Switched relationshipId={}", relationshipId);
         stopRealtimeListener();
         if ("database".equalsIgnoreCase(dbsourceType)) ensureRealtimeListener();
@@ -352,6 +399,15 @@ public class ProfileHttpServer {
                     sendJson(ex, 200, "{\"success\":false}");
                 }
             } else if (path.equals("/api/quick-reply-v2") && "POST".equals(ex.getRequestMethod())) {
+                try {
+                    var p = java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "logs", "wire-diag.log");
+                    try (var w = java.nio.file.Files.newBufferedWriter(p, java.nio.charset.StandardCharsets.UTF_8,
+                            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)) {
+                        w.write(java.time.LocalDateTime.now() + " [QR-V2] req analysisAppService=" + (analysisAppService != null)
+                                + " taskFactory=" + (analysisTaskFactory != null) + " contextAdapter=" + (contextAdapter != null)
+                                + " hashCode=" + System.identityHashCode(this) + "\n");
+                    }
+                } catch (Exception ignored) {}
                 if (analysisAppService == null || analysisTaskFactory == null || contextAdapter == null) {
                     sendJson(ex, 503, "{\"success\":false,\"error\":\"new analysis runtime not wired\"}");
                     return;
@@ -658,6 +714,7 @@ public class ProfileHttpServer {
                       .append("\",\"description\":\"RUI 内置三策略：自然 / 主动 / 轻微暧昧，各 3 条可直接发送的回复。\"")
                       .append(",\"kind\":\"SYSTEM\",\"enabled\":true}");
                     first = false;
+                    log.info("/api/skills skillManager={} allCount={}", skillManager, skillManager == null ? -1 : skillManager.getAllSkillsIncludingDisabled().size());
                     if (skillManager != null) {
                         for (var s : skillManager.getAllSkillsIncludingDisabled()) {
                             if (!first) sb.append(',');
@@ -845,8 +902,19 @@ public class ProfileHttpServer {
                 }
             } else if (path.equals("/api/dbsource/detect") && "GET".equals(ex.getRequestMethod())) {
                 String root = projectRoot != null ? projectRoot : System.getProperty("user.dir");
+                // Resolve db_bridge.py: dev (root/capture-poc/) or packaged (./db_bridge.py or ./app/db_bridge.py)
                 String bridge = root + "\\capture-poc\\db_bridge.py";
-                String wechatApiDir = root + "\\wechatapi-main";
+                java.io.File bridgeF = new java.io.File(bridge);
+                if (!bridgeF.isFile()) {
+                    bridgeF = new java.io.File("db_bridge.py");
+                }
+                if (!bridgeF.isFile()) {
+                    bridgeF = new java.io.File("app/db_bridge.py");
+                }
+                if (!bridgeF.isFile()) {
+                    bridgeF = new java.io.File("../app/db_bridge.py");
+                }
+                bridge = bridgeF.getAbsolutePath();
                 String pythonExe;
                 try {
                     pythonExe = com.harbor.relationshipassistant.common.config.PythonExecutableResolver.resolve();
@@ -855,12 +923,25 @@ public class ProfileHttpServer {
                     sendJson(ex, 200, "{\"ok\":false,\"errorCode\":\"PYTHON_NOT_FOUND\",\"error\":\"" + esc(resolveErr.getMessage()) + "\"}");
                     return;
                 }
-                log.info("[DbDetect] start python={} cwd={} script={}", pythonExe, wechatApiDir, bridge);
+                log.info("[DbDetect] start python={} script={} exists={}", pythonExe, bridge, bridgeF.isFile());
                 try {
+                    java.io.File bridgeFile = new java.io.File(bridge);
+                    java.io.File workDir = bridgeFile.getParentFile();
+                    if (workDir == null || !workDir.isDirectory()) workDir = new java.io.File(".");
+                    java.io.File wechatPkg = new java.io.File(workDir, "wechatapi-main");
+                    if (!wechatPkg.isDirectory()) wechatPkg = new java.io.File(root, "wechatapi-main");
+                    // pywin32 native DLLs live under python-runtime/Lib/site-packages/pywin32_system32
+                    java.io.File pythonExeFile = new java.io.File(pythonExe);
+                    java.io.File pyHome = pythonExeFile.getParentFile();
+                    java.io.File pywinDll = new java.io.File(pyHome, "Lib/site-packages/pywin32_system32");
                     ProcessBuilder pb = new ProcessBuilder(pythonExe, bridge, "detect");
-                    pb.directory(new java.io.File(wechatApiDir));
-                    pb.environment().put("PYTHONPATH", wechatApiDir);
+                    pb.directory(workDir);
+                    String pp = workDir.getAbsolutePath() + java.io.File.pathSeparator + wechatPkg.getAbsolutePath();
+                    pb.environment().put("PYTHONPATH", pp);
                     pb.environment().put("PYTHONIOENCODING", "utf-8");
+                    String envPath = System.getenv("PATH");
+                    if (pywinDll.isDirectory()) envPath = pywinDll.getAbsolutePath() + java.io.File.pathSeparator + envPath;
+                    pb.environment().put("PATH", envPath);
                     pb.redirectErrorStream(true);
                     Process p = pb.start();
                     java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(p.getInputStream(), "UTF-8"));
@@ -886,11 +967,16 @@ public class ProfileHttpServer {
                     String root = projectRoot != null ? projectRoot : System.getProperty("user.dir");
                     String pythonExe = com.harbor.relationshipassistant.common.config.PythonExecutableResolver.resolve();
                     String bridge = root + "\\capture-poc\\db_bridge.py";
-                    String wechatApiDir = root + "\\wechatapi-main";
-                    log.info("[DbSelfInfo] account={}", acct);
+                    java.io.File bridgeF = new java.io.File(bridge);
+                    if (!bridgeF.isFile()) bridgeF = new java.io.File("db_bridge.py");
+                    if (!bridgeF.isFile()) bridgeF = new java.io.File("app/db_bridge.py");
+                    bridge = bridgeF.getAbsolutePath();
+                    log.info("[DbSelfInfo] account={} script={}", acct, bridge);
+                    java.io.File selfWorkDir = new java.io.File(bridge).getParentFile();
+                    java.io.File selfPkg = new java.io.File(selfWorkDir, "wechatapi-main");
                     ProcessBuilder pb = new ProcessBuilder(pythonExe, bridge, "selfinfo", acct == null ? "" : acct);
-                    pb.directory(new java.io.File(wechatApiDir));
-                    pb.environment().put("PYTHONPATH", wechatApiDir);
+                    pb.directory(selfWorkDir);
+                    pb.environment().put("PYTHONPATH", selfWorkDir.getAbsolutePath() + java.io.File.pathSeparator + selfPkg.getAbsolutePath());
                     pb.environment().put("PYTHONIOENCODING", "utf-8");
                     pb.redirectErrorStream(true);
                     Process p = pb.start();
@@ -914,11 +1000,16 @@ public class ProfileHttpServer {
                     String root = projectRoot != null ? projectRoot : System.getProperty("user.dir");
                     String pythonExe = com.harbor.relationshipassistant.common.config.PythonExecutableResolver.resolve();
                     String bridge = root + "\\capture-poc\\db_bridge.py";
-                    String wechatApiDir = root + "\\wechatapi-main";
-                    log.info("[DbContacts] account={}", acct);
+                    java.io.File bridgeF = new java.io.File(bridge);
+                    if (!bridgeF.isFile()) bridgeF = new java.io.File("db_bridge.py");
+                    if (!bridgeF.isFile()) bridgeF = new java.io.File("app/db_bridge.py");
+                    bridge = bridgeF.getAbsolutePath();
+                    log.info("[DbContacts] account={} script={}", acct, bridge);
+                    java.io.File cWorkDir = new java.io.File(bridge).getParentFile();
+                    java.io.File cPkg = new java.io.File(cWorkDir, "wechatapi-main");
                     ProcessBuilder pb = new ProcessBuilder(pythonExe, bridge, "contacts", acct == null ? "" : acct);
-                    pb.directory(new java.io.File(wechatApiDir));
-                    pb.environment().put("PYTHONPATH", wechatApiDir);
+                    pb.directory(cWorkDir);
+                    pb.environment().put("PYTHONPATH", cWorkDir.getAbsolutePath() + java.io.File.pathSeparator + cPkg.getAbsolutePath());
                     pb.environment().put("PYTHONIOENCODING", "utf-8");
                     pb.redirectErrorStream(true);
                     Process p = pb.start();
@@ -1002,8 +1093,15 @@ public class ProfileHttpServer {
                         try {
                             String root = projectRoot != null ? projectRoot : System.getProperty("user.dir");
                             String pythonExe = com.harbor.relationshipassistant.common.config.PythonExecutableResolver.resolve();
-                            String bridge = root + "\\capture-poc\\db_bridge.py";
-                            String wechatApiDir = root + "\\wechatapi-main";
+                            // Resolve bridge relative to app dir: release package puts db_bridge.py at app/db_bridge.py
+                            java.nio.file.Path bridgePath = java.nio.file.Paths.get(root, "app", "db_bridge.py");
+                            if (!java.nio.file.Files.exists(bridgePath)) bridgePath = java.nio.file.Paths.get(root, "db_bridge.py");
+                            if (!java.nio.file.Files.exists(bridgePath)) bridgePath = java.nio.file.Paths.get(root, "capture-poc", "db_bridge.py");
+                            String bridge = bridgePath.toString();
+                            java.nio.file.Path wechatApiDirPath = java.nio.file.Paths.get(root, "app", "wechatapi-main");
+                            if (!java.nio.file.Files.exists(wechatApiDirPath)) wechatApiDirPath = java.nio.file.Paths.get(root, "wechatapi-main");
+                            String wechatApiDir = wechatApiDirPath.toString();
+                            log.info("[DBSource] sync start relId={} bridge={} wechatApi={} python={} account={}", relId, bridge, wechatApiDir, pythonExe, dbsourceAccount);
                             com.harbor.capturepoc.persist.ChatMessageWriter w =
                                     new com.harbor.capturepoc.persist.ChatMessageWriter(dbUrl, dbUser, dbPass);
                             com.harbor.capturepoc.source.DatabaseMessageSource src =
@@ -1258,6 +1356,10 @@ public class ProfileHttpServer {
                 }
                 try {
                     var r = wechatImportService.importContact(java.nio.file.Path.of(root), targetWxid);
+                    // Switch the active relationship to the newly imported contact so subsequent
+                    // /api/chat-history, /api/profile etc. queries hit the correct relationship.
+                    this.relationshipId = r.relationshipId;
+                    log.info("[WECHAT-IMPORT] switched active relationshipId={} inserted={}", r.relationshipId, r.inserted);
                     sendJson(ex, 200, "{\"success\":true,\"relationshipId\":" + r.relationshipId
                             + ",\"parsed\":" + r.parsed
                             + ",\"inserted\":" + r.inserted
@@ -1271,6 +1373,66 @@ public class ProfileHttpServer {
                 } catch (Exception e) {
                     log.error("/api/wechat/import failed: {}", e.toString());
                     sendJson(ex, 200, "{\"success\":false,\"error\":\"" + esc(e.getMessage()) + "\"}");
+                }
+            } else if (path.equals("/api/ai/config") && "GET".equals(ex.getRequestMethod())) {
+                if (aiConfigService == null) { sendJson(ex, 503, "{\"success\":false,\"error\":\"AI config service unavailable\"}"); return; }
+                try {
+                    var v = aiConfigService.loadView();
+                    if (v.isEmpty()) {
+                        sendJson(ex, 200, "{\"success\":true,\"configured\":false}");
+                    } else {
+                        var p = v.get();
+                        String json = "{\"success\":true,\"configured\":true,\"provider\":\"" + esc(p.providerName())
+                                + "\",\"baseUrl\":\"" + esc(p.baseUrl()) + "\",\"model\":\"" + esc(p.model())
+                                + "\",\"hasKey\":" + p.hasKey() + ",\"maskedKey\":\"" + esc(p.maskedKey()) + "\"}";
+                        sendJson(ex, 200, json);
+                    }
+                } catch (Exception e) {
+                    log.error("[AI_CONFIG_GET] failed: {}", e.getMessage());
+                    sendJson(ex, 500, "{\"success\":false,\"error\":\"" + esc(e.getMessage()) + "\"}");
+                }
+            } else if (path.equals("/api/ai/config") && "POST".equals(ex.getRequestMethod())) {
+                if (aiConfigService == null) { sendJson(ex, 503, "{\"success\":false,\"error\":\"AI config service unavailable\"}"); return; }
+                try {
+                    Map<String,String> b = parseJsonBody(readBody(ex));
+                    String provider = b.getOrDefault("provider", "DEEPSEEK");
+                    String baseUrl = b.getOrDefault("baseUrl", "");
+                    String model = b.getOrDefault("model", "");
+                    String apiKey = b.getOrDefault("apiKey", "");
+                    aiConfigService.save(provider, baseUrl, model, apiKey);
+                    if (onAiConfigChanged != null) { try { onAiConfigChanged.run(); } catch (Exception ce) { log.warn("[AI_CONFIG_SAVE] callback failed: {}", ce.toString()); } }
+                    sendJson(ex, 200, "{\"success\":true}");
+                } catch (Exception e) {
+                    log.error("[AI_CONFIG_SAVE] failed: {}", e.getMessage());
+                    sendJson(ex, 500, "{\"success\":false,\"error\":\"" + esc(e.getMessage()) + "\"}");
+                }
+            } else if (path.equals("/api/ai/test") && "POST".equals(ex.getRequestMethod())) {
+                if (aiConfigService == null) { sendJson(ex, 503, "{\"success\":false,\"error\":\"AI config service unavailable\"}"); return; }
+                try {
+                    Map<String,String> b = parseJsonBody(readBody(ex));
+                    String provider = b.getOrDefault("provider", "DEEPSEEK");
+                    String baseUrl = b.getOrDefault("baseUrl", "");
+                    String model = b.getOrDefault("model", "");
+                    String apiKey = b.getOrDefault("apiKey", "");
+                    if (apiKey == null || apiKey.isBlank()) {
+                        sendJson(ex, 400, "{\"success\":false,\"error\":\"请填写 API Key\"}"); return;
+                    }
+                    String url = (baseUrl == null || baseUrl.isBlank()) ? com.harbor.relationshipassistant.infrastructure.ai.DeepSeekProvider.DEFAULT_BASE_URL : baseUrl.trim();
+                    String mdl = (model == null || model.isBlank()) ? com.harbor.relationshipassistant.infrastructure.ai.DeepSeekProvider.DEFAULT_MODEL : model.trim();
+                    var p = new com.harbor.relationshipassistant.infrastructure.ai.DeepSeekProvider(url, apiKey.trim(), mdl);
+                    var req = com.harbor.relationshipassistant.infrastructure.ai.AIRequest.of(
+                            "You are a helpful assistant.",
+                            java.util.List.of(new com.harbor.relationshipassistant.infrastructure.ai.AIRequest.Turn("user", "请回复：连接测试成功")));
+                    req.setTemperature(0.0);
+                    req.setMaxTokens(50);
+                    var resp = p.generate(req);
+                    log.info("[AI_TEST] success provider={} model={} respLen={}", provider, mdl, resp.text() == null ? 0 : resp.text().length());
+                    sendJson(ex, 200, "{\"success\":true,\"message\":\"连接成功\"}");
+                } catch (Exception e) {
+                    log.error("[AI_TEST] failed: {}", e.getMessage());
+                    String msg = e.getMessage() == null ? "连接失败" : e.getMessage();
+                    if (msg.length() > 300) msg = msg.substring(0, 300);
+                    sendJson(ex, 200, "{\"success\":false,\"error\":\"" + esc(msg) + "\"}");
                 }
             } else {
                 sendJson(ex, 404, "{\"error\":\"unknown endpoint\"}");

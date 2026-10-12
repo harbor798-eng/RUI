@@ -58,8 +58,16 @@ public class MainController {
     private AnalysisTaskFactory analysisTaskFactory;
     private AnalysisContextAdapter contextAdapter;
 
+    private AIProvider lastProvider;
     public void setSkillManager(SkillManager skillManager) {
         this.skillManager = skillManager;
+        diag("setSkillManager: ready=" + (skillManager == null ? -1 : skillManager.getReadySkills().size())
+                + " lastProvider=" + (lastProvider != null));
+        if (skillManager != null && lastProvider != null) {
+            try { wireNewAnalysisRuntime(lastProvider); } catch (Exception e) {
+                diag("setSkillManager rewire failed: " + e);
+            }
+        }
     }
 
     /** Full shutdown: stop HTTP server, release resources. Called by ChatViewApplication.stop(). */
@@ -76,27 +84,64 @@ public class MainController {
     }
 
     private void initialize() {
+        // Ensure WebView localStorage (theme, aiContextSize, etc.) persists across launches.
+        // Without a writable userDataDirectory, WebEngine localStorage may be ephemeral,
+        // causing the theme to reset on every restart.
+        try {
+            java.nio.file.Path webDataDir = java.nio.file.Paths.get(
+                    System.getProperty("user.home"), ".rui", "webview-data").toAbsolutePath();
+            java.nio.file.Files.createDirectories(webDataDir);
+            System.setProperty("javafx.web.userDataDirectory", webDataDir.toString());
+            log.info("[JEVE][WebView] userDataDirectory = {}", webDataDir);
+        } catch (Exception e) {
+            log.warn("[JEVE][WebView] failed to set userDataDirectory: {}", e.toString());
+        }
         AesCryptoService crypto = new AesCryptoService(aesKey);
         AiConfigService aiConfig = new AiConfigService(ds, crypto);
         ProfileService profiles = new ProfileService(ds, new AuditLogRepository(ds), crypto);
         this.relRepo = new RelationshipRepository(ds);
         this.chatRepo = new ChatMessageRepository(ds);
         ContextBuilder builder = new ContextBuilder(relRepo, chatRepo, profiles, new ObservationRepository(ds));
-        AIProvider provider = aiConfig.buildProvider();
+        AIProvider provider = null;
+        try {
+            provider = aiConfig.buildProvider();
+        } catch (Exception ex) {
+            log.warn("[AI] Provider not configured; main UI will load without AI: {}", ex.toString());
+        }
         this.profileService = profiles;
         this.quickReplyService = new QuickReplyService(builder, provider);
         this.analysisService = AnalysisServiceFactory.build(ds, provider);
         this.reportService = new DeepObservationReportService();
 
         try {
+            // Resolve web resources: dev (src/main/resources/web) or packaged (app/web relative to working dir).
             java.nio.file.Path webDir = java.nio.file.Paths.get("src/main/resources/web").toAbsolutePath();
             if (!java.nio.file.Files.exists(webDir)) webDir = java.nio.file.Paths.get("web").toAbsolutePath();
+            if (!java.nio.file.Files.exists(webDir)) webDir = java.nio.file.Paths.get("app/web").toAbsolutePath();
+            if (!java.nio.file.Files.exists(webDir)) webDir = java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "web");
+            log.info("[JEVE][Bootstrap] webDir={} exists={}", webDir, java.nio.file.Files.exists(webDir));
             profileHttpServer = new ProfileHttpServer(profiles, relationshipId, 18080, webDir);
             profileHttpServer.setQuickReplyService(quickReplyService);
             profileHttpServer.setAnalysisService(analysisService);
             profileHttpServer.setRelationshipRepository(relRepo);
             profileHttpServer.setDeepReportService(reportService);
             profileHttpServer.setChatMessageRepository(chatRepo);
+            profileHttpServer.setDataSourceFactory(ds);
+            profileHttpServer.setAiConfigService(aiConfig);
+            profileHttpServer.setOnAiConfigChanged(() -> {
+                try {
+                    AIProvider p = aiConfig.buildProvider();
+                    wireNewAnalysisRuntime(p);
+                    log.info("[JEVE][Bootstrap] Analysis runtime rewired after AI config save");
+                } catch (Exception e) {
+                    log.warn("[JEVE][Bootstrap] rewire failed: {}", e.toString());
+                }
+            });
+            // Always wire SkillManager to HTTP layer so /api/skills works regardless of AI provider
+            if (skillManager != null) {
+                profileHttpServer.setSkillManager(skillManager);
+                log.info("[JEVE][Bootstrap] SkillManager wired to HTTP layer: ready={}", skillManager.getReadySkills().size());
+            }
             // Wire DistillationService
             try {
                 var distillSkillsRoot = java.nio.file.Paths.get("skills").toAbsolutePath().normalize();
@@ -159,7 +204,21 @@ public class MainController {
             log.info("[JEVE][WebView] Initializing WebView...");
             javafx.scene.web.WebView webView = new javafx.scene.web.WebView();
             webView.setStyle("-fx-background-color: transparent;");
-            webView.setPageFill(javafx.scene.paint.Color.WHITE); // Classic default
+            // Read persisted theme BEFORE page load to avoid white flash on glass startup.
+            String persistedTheme = null;
+            try {
+                java.nio.file.Path tp = java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "theme.properties");
+                if (java.nio.file.Files.exists(tp)) {
+                    java.util.Properties p = new java.util.Properties();
+                    try (java.io.InputStream in = java.nio.file.Files.newInputStream(tp)) { p.load(in); }
+                    persistedTheme = p.getProperty("theme");
+                    log.info("[JEVE][WebView] persisted theme at startup = {}", persistedTheme);
+                }
+            } catch (Exception e) {
+                log.warn("[JEVE][WebView] cannot read persisted theme: {}", e.toString());
+            }
+            boolean startGlass = "desktop-glass".equals(persistedTheme);
+            webView.setPageFill(startGlass ? javafx.scene.paint.Color.TRANSPARENT : javafx.scene.paint.Color.WHITE);
             // Explicitly set all containers transparent (FXML inline styles may not apply reliably)
             contentArea.setStyle("-fx-background-color: transparent; -fx-padding: 0;");
             if (contentArea.getParent() instanceof javafx.scene.layout.Region parentRegion) {
@@ -168,6 +227,14 @@ public class MainController {
             }
             javafx.scene.web.WebEngine engine = webView.getEngine();
             engine.setOnAlert(e -> log.info("[WebView][JS][alert] {}", e.getData()));
+            engine.setOnError(e -> log.warn("[WebView][ERROR] {}", e.getMessage()));
+            engine.setOnStatusChanged(e -> {
+                if (e.getData() != null && !e.getData().isEmpty()) {
+                    log.info("[WebView][status] {}", e.getData());
+                }
+            });
+            log.info("[JEVE][WebView] userDataDirectory effective = {}",
+                    System.getProperty("javafx.web.userDataDirectory"));
             DesktopBridge bridge = new DesktopBridge(stage, webView);
             // Wire WebView 采集开关 to the real RealtimeCaptureService (PrintWindow + OCR + SQLite).
             try {
@@ -217,80 +284,8 @@ public class MainController {
             AnchorPane.setLeftAnchor(webView, 0.0);
             AnchorPane.setRightAnchor(webView, 0.0);
 
-            // ---- Native drag overlay: Region on top of WebView header area ----
-            // WebView does not generate MOUSE_DRAGGED in transparent Stage, and JS mousemove
-            // is unreliable. A JavaFX Region placed above WebView receives mouse events directly.
-            // NOTE: fully transparent (alpha=0) Region does not receive mouse events even with
-            // pickOnBounds=true; use a near-invisible 1% black fill to enable hit testing.
-            final DesktopBridge dragBridge = bridge;
-            javafx.scene.layout.Region dragOverlay = new javafx.scene.layout.Region();
-            dragOverlay.setStyle("-fx-background-color: rgba(0,0,0,0.01);");
-            dragOverlay.setPickOnBounds(true);
-            dragOverlay.setMouseTransparent(false);
-            dragOverlay.setPrefHeight(48.0);
-            AnchorPane.setTopAnchor(dragOverlay, 0.0);
-            AnchorPane.setLeftAnchor(dragOverlay, 36.0);
-            AnchorPane.setRightAnchor(dragOverlay, 120.0); // 350-230: covers header center, excludes back btn and right btns
-            contentArea.getChildren().add(dragOverlay);
-
-            final double[] overlayOffset = new double[2];
-            dragOverlay.setOnMousePressed(e -> {
-                if (!e.isPrimaryButtonDown()) return;
-                overlayOffset[0] = e.getScreenX() - stage.getX();
-                overlayOffset[1] = e.getScreenY() - stage.getY();
-                log.info("[WindowDiag][Overlay] drag start offset=({},{}) stage=({},{})",
-                    overlayOffset[0], overlayOffset[1], stage.getX(), stage.getY());
-                e.consume();
-            });
-            dragOverlay.setOnMouseDragged(e -> {
-                if (!e.isPrimaryButtonDown()) return;
-                double nx = e.getScreenX() - overlayOffset[0];
-                double ny = e.getScreenY() - overlayOffset[1];
-                stage.setX(nx);
-                stage.setY(ny);
-                e.consume();
-            });
-            dragOverlay.setOnMouseReleased(e -> {
-                log.info("[WindowDiag][Overlay] drag end stage=({},{})", stage.getX(), stage.getY());
-                overlayOffset[0] = 0;
-                overlayOffset[1] = 0;
-                e.consume();
-                // Trigger edge docking check (same as JS endDrag)
-                try { dragBridge.endDrag(); } catch (Exception ignored) {}
-            });
-            log.info("[WindowDiag][Overlay] drag overlay registered at header area (36..230, 0..48)");
-
-            // ---- Window drag: scene-level event filter on header area ----
-            // WebView consumes mouse events, so we intercept at scene level (capturing phase).
-            // Header is top 48px; skip left back button (x<36) and right buttons (x>230).
-            final double[] dragOffset = new double[2];
-            final boolean[] dragging = {false};
-            webView.sceneProperty().addListener((obs, oldScene, newScene) -> {
-                if (newScene == null) return;
-                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
-                    double y = e.getSceneY();
-                    double x = e.getSceneX();
-                    if (e.isPrimaryButtonDown() && y < 48 && x > 36 && x < 230) {
-                        dragging[0] = true;
-                        dragOffset[0] = e.getScreenX() - stage.getX();
-                        dragOffset[1] = e.getScreenY() - stage.getY();
-                        log.info("[WindowDiag][FX] scene drag start x={} y={} offset=({},{})", x, y, dragOffset[0], dragOffset[1]);
-                    }
-                });
-                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_DRAGGED, e -> {
-                    if (dragging[0] && e.isPrimaryButtonDown()) {
-                        double newX = e.getScreenX() - dragOffset[0];
-                        double newY = e.getScreenY() - dragOffset[1];
-                        stage.setX(newX);
-                        stage.setY(newY);
-                        log.info("[WindowDiag][FX] scene drag move to ({},{})", newX, newY);
-                    }
-                });
-                newScene.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_RELEASED, e -> {
-                    dragging[0] = false;
-                });
-                log.info("[WindowDiag][FX] scene drag filters registered");
-            });
+            // Window drag handled by bridge.startDrag/dragTo/endDrag from JS (if needed).
+            // Removed temporary scene-level drag filter that blocked About close clicks on header.
 
             // ---- WindowDiag: event filters on WebView ----
             webView.addEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, e -> {
@@ -318,9 +313,23 @@ public class MainController {
      * SkillManager 由 ChatViewApplication 注入（与 SkillWatcher 共享同一 Registry）。
      * 如果 skillManager 为 null，新链不可用，旧 QuickReplyService 继续工作。
      */
+    private static void diag(String msg) {
+        try {
+            var p = java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "logs", "wire-diag.log");
+            java.nio.file.Files.createDirectories(p.getParent());
+            try (var w = java.nio.file.Files.newBufferedWriter(p, java.nio.charset.StandardCharsets.UTF_8,
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)) {
+                w.write(java.time.LocalDateTime.now() + " [" + Thread.currentThread().getName() + "] " + msg + "\n");
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void wireNewAnalysisRuntime(AIProvider provider) {
+        this.lastProvider = provider;
+        diag("wireNewAnalysisRuntime: provider=" + (provider != null) + " skillManager=" + (skillManager != null)
+                + " hashCode=" + System.identityHashCode(this));
         if (skillManager == null) {
-            log.warn("[JEVE][Bootstrap] SkillManager not injected; new Analysis Runtime disabled.");
+            diag("wireNewAnalysisRuntime: SKIP skillManager==null");
             return;
         }
         try {
@@ -358,13 +367,10 @@ public class MainController {
             profileHttpServer.setSkillAdapter(skillAdapter);
             profileHttpServer.setSystemHostPlanner(
                     new com.harbor.relationshipassistant.application.systemhost.SystemHostPlanner());
-            log.info("[JEVE][Bootstrap] AnalysisApplicationService injected: true, readySkills={}, knowledgeItems={}",
-                    skillManager.getReadySkills().size(), gtjKnowledge.size());
-            skillManager.getReadySkills().forEach(s ->
-                    log.info("[JEVE][Bootstrap] READY skill name={} path={}",
-                            s.getName(), s.getSkillDirectory()));
+            diag("wireNewAnalysisRuntime: SUCCESS readySkills=" + skillManager.getReadySkills().size()
+                    + " knowledgeItems=" + gtjKnowledge.size() + " analysisAppService=" + (analysisApplicationService != null));
         } catch (Exception e) {
-            log.error("[JEVE][Bootstrap] Failed to wire new Analysis Runtime: {}", e.getMessage(), e);
+            diag("wireNewAnalysisRuntime: FAILED " + e);
         }
     }
 

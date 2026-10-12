@@ -17,17 +17,36 @@ public class ChatViewLauncher {
     static volatile ServerSocket lockSocket;
 
     public static void main(String[] args) {
+        // === Earliest startup diagnostic ===
+        java.io.PrintWriter sw = null;
+        try {
+            java.nio.file.Path logDir = java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "logs");
+            java.nio.file.Files.createDirectories(logDir);
+            sw = new java.io.PrintWriter(new java.io.OutputStreamWriter(
+                java.nio.file.Files.newOutputStream(logDir.resolve("startup.log"),
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND),
+                java.nio.charset.StandardCharsets.UTF_8), true);
+            sw.println("===== " + java.time.LocalDateTime.now() + " RUI main() entry =====");
+            sw.println("java.version=" + System.getProperty("java.version"));
+            sw.println("user.dir=" + System.getProperty("user.dir"));
+            sw.println("args=" + java.util.Arrays.toString(args));
+        } catch (Exception e) {
+            System.err.println("[Startup] cannot open startup.log: " + e);
+        }
+        final java.io.PrintWriter out = sw;
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            try { if (out != null) { out.println("[UNCAUGHT thread=" + t.getName() + "] " + e); for (StackTraceElement el : e.getStackTrace()) out.println("    at " + el); } } catch (Exception ignored) {}
+        });
+
         // ---- Single-instance guard: bind a localhost ServerSocket. ----
         ServerSocket lock;
         try {
+            if (out != null) out.println("[main] binding single-instance port 18099");
             lock = new ServerSocket(SINGLE_INSTANCE_PORT);
             lockSocket = lock;
-        } catch (BindException be) {
-            // Another JEVE already running. Tell it to come forward and exit.
-            notifyExistingInstance();
-            return;
+            if (out != null) out.println("[main] bound OK, launching JavaFX");
         } catch (Exception e) {
-            // If anything unexpected, fall through and launch anyway rather than blocking the user.
+            if (out != null) { out.println("[main] single-instance bind failed: " + e); for (StackTraceElement el : e.getStackTrace()) out.println("    at " + el); }
             lock = null;
         }
 
@@ -60,7 +79,16 @@ public class ChatViewLauncher {
             listener.start();
         }
 
-        Application.launch(ChatViewApplication.class, args);
+        try {
+            Application.launch(ChatViewApplication.class, args);
+        } catch (Throwable t) {
+            if (out != null) {
+                out.println("[main] Application.launch threw: " + t);
+                for (StackTraceElement el : t.getStackTrace()) out.println("    at " + el);
+                if (t.getCause() != null) out.println("Caused by: " + t.getCause());
+            }
+            t.printStackTrace();
+        }
     }
 
     /** Release the single-instance lock so next launch can bind. */

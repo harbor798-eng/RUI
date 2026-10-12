@@ -13,12 +13,16 @@ public class AnalysisExecutor {
     private final AIProvider provider;
 
     public AnalysisExecutor(AIProvider provider) {
-        if (provider == null) throw new IllegalArgumentException("provider must not be null");
+        // Provider may be null when user has not configured an AI key;
+        // execute() will then return a friendly "not configured" response.
         this.provider = provider;
     }
 
     public AIResponse execute(AIRequest request) {
         if (request == null) throw new IllegalArgumentException("AIRequest must not be null");
+        if (provider == null) {
+            return new AIResponse("AI Provider 未配置，请先在设置中配置 API Key。", "none", "none", 0, 0);
+        }
         System.out.println("[AnalysisExecutor] start. provider=" + provider.getProviderName()
                 + ", model=" + request.getModel()
                 + ", temperature=" + request.getTemperature()

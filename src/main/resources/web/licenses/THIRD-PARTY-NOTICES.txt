@@ -1,0 +1,73 @@
+RUI Third-Party Notices
+======================
+
+This product includes software developed by third parties.
+See below for license details.
+
+----------------------------------------------------------------
+1. ex-skill
+----------------------------------------------------------------
+Project:  ex-skill (persona distillation pipeline)
+Author:   perkfly
+Source:   https://github.com/perkfly/ex-skill
+Commit:   c5ece53ab66948c6ea53e0df51c60a6ca0e96ea8
+License:  MIT License
+Files:    src/main/resources/exskill/prompts/*.md
+          src/main/resources/exskill/tools/*.py
+          src/main/resources/exskill/LICENSE
+
+The MIT License text is included in exskill/LICENSE.
+
+----------------------------------------------------------------
+2. wechatauto-replica
+----------------------------------------------------------------
+Project:  wechatauto-replica (WeChat local DB reader / automation)
+Author:   fanyuantaier
+Source:   https://github.com/fanyuantaier/wechatauto-replica
+Commit:   62503d76a0db069171cb4e42e87090ad285db489
+Version:  1.2.6.1
+License:  Apache License 2.0
+Files:    bundled in the Python runtime (see build script)
+
+The Apache License 2.0 text is included below and in
+licenses/wechatauto-Apache2.0.txt.
+
+RUI modifications:
+- RUI integrates wechatauto as a subprocess via db_bridge.py.
+- No modification to upstream source code in the first release.
+
+----------------------------------------------------------------
+3. Python Runtime
+----------------------------------------------------------------
+Python Software Foundation License (PSF)
+Source: https://www.python.org/downloads/
+Version: 3.12.x (fixed at build time)
+Used as embedded runtime. See https://docs.python.org/3/license.html
+
+----------------------------------------------------------------
+4. Python dependencies (locked at build time)
+----------------------------------------------------------------
+- cryptography (Apache 2.0 / BSD) — https://github.com/pyca/cryptography
+- uiautomation (LGPL / MIT-style) — Windows UI automation
+- pywin32 (PSF) — Windows Python extensions
+- Pillow (HPND) — imaging
+- psutil (BSD) — process utilities
+- colorama (BSD) — terminal colors
+- winsdk (MIT) — Windows SDK
+- imageio-ffmpeg (MIT) — video frame extraction
+- pyperclip (MIT) — clipboard
+
+Exact versions are recorded in the build script output.
+
+----------------------------------------------------------------
+5. Java / JavaFX dependencies
+----------------------------------------------------------------
+- JavaFX (GPL v2 + Classpath Exception) — https://openjfx.io
+- SQLite JDBC (public domain / BSD) — https://github.com/xerial/sqlite-jdbc
+- JNA (Apache 2.0 / LGPL) — https://github.com/java-native-access/jna
+- SLF4J / Logback (MIT / EPL) — logging
+
+----------------------------------------------------------------
+For full license texts, see:
+  licenses/ex-skill-MIT.txt
+  licenses/wechatauto-Apache2.0.txt

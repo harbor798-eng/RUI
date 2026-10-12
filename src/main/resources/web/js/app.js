@@ -96,18 +96,17 @@
     const t = e.target.closest('#header-resync');
     if (!t) return;
     if (t.disabled) return;
+    const diag = (msg) => { try { if (window.desktopBridge && window.desktopBridge.diagTheme) window.desktopBridge.diagTheme(msg); } catch(_){} };
+    diag("[RESYNC-DIAG] click target=" + e.target.tagName + " outerHTML=" + t.outerHTML + " class=" + t.className + " disabled=" + t.disabled);
     t.disabled = true;
-    const orig = t.textContent;
     t.classList.add('rs-spinning');
-    t.textContent = '';
     fetch('http://127.0.0.1:18080/api/dbsource/sync', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
       .then(r=>r.json())
       .then(d => {
-        // Wait a bit for background sync to start, then refresh chat history if on chat page
         setTimeout(()=>{
           t.classList.remove('rs-spinning');
-          t.textContent = orig;
           t.disabled = false;
+          diag("[RESYNC-DIAG] restored outerHTML=" + t.outerHTML);
           if (typeof JeveRouter !== 'undefined' && JeveRouter.currentPage === 'chat-history') {
             try { JeveRouter.navigate('chat-history'); } catch(e){}
           }
@@ -115,8 +114,8 @@
       })
       .catch(err => {
         t.classList.remove('rs-spinning');
-        t.textContent = orig;
         t.disabled = false;
+        diag("[RESYNC-DIAG] error restored outerHTML=" + t.outerHTML);
       });
   });
 
@@ -125,25 +124,23 @@
     if (e.button !== 0) return;
     const onHeader = e.target.closest('.jeve-header');
     const onButton = e.target.closest('button, a, input, select, textarea, [data-no-drag]');
-    if (window.desktopBridge && window.desktopBridge.diagTheme) {
-      try { window.desktopBridge.diagTheme('[DragDiag] mousedown target=' + e.target.tagName + ' onHeader=' + !!onHeader + ' onButton=' + !!onButton + ' bridge=' + (!!window.desktopBridge.startDrag)); } catch(err) {}
-    }
+    const diag = (msg) => { try { if (window.desktopBridge && window.desktopBridge.diagTheme) window.desktopBridge.diagTheme(msg); } catch(_){} };
+    diag('[DragDiag] mousedown target=' + e.target.tagName + ' onHeader=' + !!onHeader + ' onButton=' + !!onButton + ' screen=(' + e.screenX + ',' + e.screenY + ') client=(' + e.clientX + ',' + e.clientY + ') dpr=' + window.devicePixelRatio);
     if (!onHeader) return;
     if (onButton) return;
     if (!window.desktopBridge) return;
-    // Use JavaFX native drag — handles mouse capture on transparent WebView
-    if (typeof window.desktopBridge.startNativeDrag === 'function') {
-      try { window.desktopBridge.startNativeDrag(); dragging = true; } catch (err) {}
-    } else {
-      try { window.desktopBridge.startDrag(e.screenX, e.screenY); dragging = true; } catch (err) {}
-    }
+    try { window.desktopBridge.startDrag(e.screenX, e.screenY); diag('[DragDiag] startDrag called screen=(' + e.screenX + ',' + e.screenY + ')'); } catch (err) { diag('[DragDiag] startDrag err=' + err); }
+    dragging = true;
   });
   document.addEventListener('mousemove', (e) => {
     if (!dragging || !window.desktopBridge) return;
     try { window.desktopBridge.dragTo(e.screenX, e.screenY); } catch (err) {}
-  });  document.addEventListener('mouseup', () => {
+  });
+  document.addEventListener('mouseup', (e) => {
     if (!dragging) return;
     dragging = false;
+    const diag = (msg) => { try { if (window.desktopBridge && window.desktopBridge.diagTheme) window.desktopBridge.diagTheme(msg); } catch(_){} };
+    diag('[DragDiag] mouseup screen=(' + e.screenX + ',' + e.screenY + ')');
     if (window.desktopBridge) { try { window.desktopBridge.endDrag(); } catch (err) {} }
   });
 

@@ -129,28 +129,42 @@ public class DesktopBridge {
     }
 
     public void startDrag(double screenX, double screenY) {
-        log.info("[BridgeDiag][Bridge] startDrag bridgeId={} screen=({}, {})", bridgeId, screenX, screenY);
-        dragOffsetX = stage.getX() - screenX;
-        dragOffsetY = stage.getY() - screenY;
+        // Round offset to whole pixels to avoid sub-pixel jitter from DPI scaling
+        dragOffsetX = Math.round(stage.getX() - screenX);
+        dragOffsetY = Math.round(stage.getY() - screenY);
+        String line = "startDrag screen=(" + screenX + "," + screenY + ") stageBefore=(" + stage.getX() + "," + stage.getY() + ") offset=(" + dragOffsetX + "," + dragOffsetY + ") dpr=" + javafx.stage.Screen.getPrimary().getOutputScaleX();
+        log.info("[DRAG-DIAG] {}", line);
+        appendDiagLog("Java", line);
     }
 
     /** Use JavaFX native window drag gesture — handles mouse capture on transparent WebView. */
     public void startNativeDrag() {
-        // stage.startDrag() not available in JavaFX 26; drag handled by native Region overlay.
-        log.info("[BridgeDiag][Bridge] startNativeDrag no-op (native Region handles drag) bridgeId={}", bridgeId);
+        appendDiagLog("Java", "startNativeDrag called (no-op)");
     }
 
     public void dragTo(double screenX, double screenY) {
+        // Guard against invalid/off-screen coordinates (e.g. -32000 sent when mouse leaves window)
+        if (screenX < -1000 || screenY < -1000 || screenX > 100000 || screenY > 100000) {
+            appendDiagLog("Java", "dragTo ignored invalid screen=(" + screenX + "," + screenY + ")");
+            return;
+        }
         Platform.runLater(() -> {
-            double nx = screenX + dragOffsetX;
-            double ny = screenY + dragOffsetY;
+            double nx = Math.round(screenX + dragOffsetX);
+            double ny = Math.round(screenY + dragOffsetY);
+            // Skip redundant updates: don't move if already at the snapped position
+            if (Math.abs(stage.getX() - nx) < 0.5 && Math.abs(stage.getY() - ny) < 0.5) return;
+            String line = "dragTo screen=(" + screenX + "," + screenY + ") offset=(" + dragOffsetX + "," + dragOffsetY + ") curStage=(" + stage.getX() + "," + stage.getY() + ") newStage=(" + nx + "," + ny + ")";
+            log.info("[DRAG-DIAG] {}", line);
+            appendDiagLog("Java", line);
             stage.setX(nx);
             stage.setY(ny);
         });
     }
 
     public void endDrag() {
-        log.info("[BridgeDiag][Bridge] endDrag bridgeId={}", bridgeId);
+        String line = "endDrag finalStage=(" + stage.getX() + "," + stage.getY() + ")";
+        log.info("[DRAG-DIAG] {}", line);
+        appendDiagLog("Java", line);
         if (dockState == DockState.NORMAL) checkEdgeSnap();
         else { dockState = DockState.NORMAL; dockEdge = Edge.NONE; }
     }
@@ -291,6 +305,54 @@ public class DesktopBridge {
 
     public String getBridgeId() { return bridgeId; }
 
+    // ===== Theme persistence (Java-side, reliable across WebView localStorage flush timing) =====
+    private static final java.util.Set<String> VALID_THEMES =
+            java.util.Set.of("classic", "desktop-glass");
+    private static java.nio.file.Path themeFile() {
+        return java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "theme.properties");
+    }
+    public void saveTheme(String theme) {
+        if (theme == null || !VALID_THEMES.contains(theme)) {
+            log.warn("[BridgeDiag][Theme] saveTheme rejected invalid value: {}", theme);
+            return;
+        }
+        try {
+            java.nio.file.Path p = themeFile();
+            java.nio.file.Files.createDirectories(p.getParent());
+            java.util.Properties props = new java.util.Properties();
+            props.setProperty("theme", theme);
+            try (java.io.OutputStream out = java.nio.file.Files.newOutputStream(p)) {
+                props.store(out, "RUI theme");
+            }
+            log.info("[BridgeDiag][Theme] saveTheme -> {}", theme);
+        } catch (Exception e) {
+            log.warn("[BridgeDiag][Theme] saveTheme failed: {}", e.toString());
+        }
+    }
+    public String loadTheme() {
+        try {
+            java.nio.file.Path p = themeFile();
+            if (!java.nio.file.Files.exists(p)) {
+                log.info("[BridgeDiag][Theme] loadTheme: no file, returning null");
+                return null;
+            }
+            java.util.Properties props = new java.util.Properties();
+            try (java.io.InputStream in = java.nio.file.Files.newInputStream(p)) {
+                props.load(in);
+            }
+            String t = props.getProperty("theme");
+            if (t == null || !VALID_THEMES.contains(t)) {
+                log.info("[BridgeDiag][Theme] loadTheme: invalid value '{}', returning null", t);
+                return null;
+            }
+            log.info("[BridgeDiag][Theme] loadTheme -> {}", t);
+            return t;
+        } catch (Exception e) {
+            log.warn("[BridgeDiag][Theme] loadTheme failed: {}", e.toString());
+            return null;
+        }
+    }
+
     /**
      * Toggle theme. Classic = warm grey #F6F5F2 with opaque WebView.
      * Desktop Glass = transparent frame + transparent pageFill + DWM Acrylic.
@@ -339,6 +401,56 @@ public class DesktopBridge {
     /** Diagnostic logger: JS calls this to push runtime state to the Java terminal. */
     public void diagTheme(String msg) {
         log.info("[ThemeDiag][JS] {}", msg);
+        appendDiagLog("JS", msg);
+    }
+
+    /** Unified diagnostic log file: ~/.rui/logs/theme-diagnostics.log */
+    private static final long DIAG_MAX_BYTES = 2L * 1024L * 1024L; // 2 MB
+    private static final int DIAG_MAX_ARCHIVES = 3;
+    private static java.nio.file.Path diagLogPath() {
+        return java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "logs", "theme-diagnostics.log");
+    }
+    private static synchronized void appendDiagLog(String source, String msg) {
+        try {
+            java.nio.file.Path p = diagLogPath();
+            java.nio.file.Files.createDirectories(p.getParent());
+            // Rotation: if current log exceeds limit, shift .1 -> .2 -> .3 -> delete .3
+            if (java.nio.file.Files.exists(p) && java.nio.file.Files.size(p) > DIAG_MAX_BYTES) {
+                rotateDiagLog(p);
+            }
+            String line = java.time.LocalDateTime.now().toString() + " [" + source + "] " + msg + System.lineSeparator();
+            java.nio.file.Files.write(p, line.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception e) {
+            log.warn("[DiagLog] append failed: {}", e.toString());
+        }
+    }
+    private static void rotateDiagLog(java.nio.file.Path p) {
+        try {
+            // Delete oldest (.3), shift .2 -> .3, .1 -> .2, current -> .1
+            java.nio.file.Path p3 = java.nio.file.Paths.get(p + ".3");
+            if (java.nio.file.Files.exists(p3)) java.nio.file.Files.deleteIfExists(p3);
+            java.nio.file.Path p2 = java.nio.file.Paths.get(p + ".2");
+            if (java.nio.file.Files.exists(p2)) java.nio.file.Files.move(p2, p3, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            java.nio.file.Path p1 = java.nio.file.Paths.get(p + ".1");
+            if (java.nio.file.Files.exists(p1)) java.nio.file.Files.move(p1, p2, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            java.nio.file.Files.move(p, p1, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            log.warn("[DiagLog] rotation failed: {}", e.toString());
+        }
+    }
+    /** JS-callable: append a line to the shared diagnostic log. */
+    public void diagLog(String source, String msg) {
+        // High-frequency JS diagnostics (clickDiag, chatPreview per-tick) are gated by system property.
+        // Default release mode: only log to Java terminal, skip file append for noisy sources.
+        boolean verbose = Boolean.getBoolean("rui.diag.verbose");
+        if (verbose) {
+            log.info("[Diag][{}] {}", source, msg);
+            appendDiagLog(source == null ? "JS" : source, msg == null ? "" : msg);
+        } else {
+            // Still record to Java terminal at FINE level so production logs stay clean
+            log.debug("[Diag][{}] {}", source, msg);
+        }
     }
 
     /** Walk the scene graph and log every Region's background style to find the white blocker. */

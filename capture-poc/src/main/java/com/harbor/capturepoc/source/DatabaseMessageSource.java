@@ -63,6 +63,8 @@ public class DatabaseMessageSource {
         pb.directory(new java.io.File(wechatApiDir));
         pb.environment().put("PYTHONPATH", wechatApiDir);
         pb.environment().put("PYTHONIOENCODING", "utf-8");
+        pb.environment().remove("PYTHONHOME");
+        appendPywin32Path(pb);
         if (account != null && !account.isBlank()) pb.environment().put("WECHAT_ACCOUNT", account);
         pb.redirectErrorStream(false);
         Process p = pb.start();
@@ -106,6 +108,8 @@ public class DatabaseMessageSource {
         pb.directory(new java.io.File(wechatApiDir));
         pb.environment().put("PYTHONPATH", wechatApiDir);
         pb.environment().put("PYTHONIOENCODING", "utf-8");
+        pb.environment().remove("PYTHONHOME");
+        appendPywin32Path(pb);
         if (account != null && !account.isBlank()) pb.environment().put("WECHAT_ACCOUNT", account);
         pb.redirectErrorStream(true);
         listenProcess = pb.start();
@@ -139,6 +143,26 @@ public class DatabaseMessageSource {
     }
 
     // --- minimal JSON parsing (no external dep) ---
+
+    /**
+     * Append pywin32 DLL directories to the child process PATH so win32ui,
+     * pywintypes312.dll, pythoncom312.dll etc. can be loaded without
+     * requiring system-wide PATH edits.
+     */
+    private void appendPywin32Path(ProcessBuilder pb) {
+        String existing = pb.environment().getOrDefault("PATH", "");
+        StringBuilder sb = new StringBuilder();
+        sb.append(wechatApiDir);
+        java.io.File win32 = new java.io.File(wechatApiDir, "win32");
+        if (win32.isDirectory()) sb.append(java.io.File.pathSeparator).append(win32.getAbsolutePath());
+        java.io.File pythonwin = new java.io.File(wechatApiDir, "pythonwin");
+        if (pythonwin.isDirectory()) sb.append(java.io.File.pathSeparator).append(pythonwin.getAbsolutePath());
+        java.io.File pywin32sys = new java.io.File(wechatApiDir, "pywin32_system32");
+        if (pywin32sys.isDirectory()) sb.append(java.io.File.pathSeparator).append(pywin32sys.getAbsolutePath());
+        String added = sb.toString();
+        pb.environment().put("PATH", added + (existing.isEmpty() ? "" : java.io.File.pathSeparator + existing));
+    }
+
     private static List<Msg> parseHistory(String json) {
         List<Msg> out = new ArrayList<>();
         if (json == null || json.isBlank()) return out;

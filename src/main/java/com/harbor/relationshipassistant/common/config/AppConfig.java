@@ -50,7 +50,23 @@ public class AppConfig {
 
     public String get(String key) { return props.getProperty(key); }
 
-    public String dbUrl() { return props.getProperty("db.url"); }
+    public String dbUrl() {
+        String url = props.getProperty("db.url");
+        // Resolve relative SQLite paths to %USERPROFILE%/.rui/data so user data
+        // never lands in the read-only install directory.
+        if (url != null && url.startsWith("jdbc:sqlite:") && !url.contains(":///")) {
+            String tail = url.substring("jdbc:sqlite:".length());
+            if (!tail.startsWith("/") && !tail.startsWith("\\") && !tail.contains(":")) {
+                Path userDbDir = Path.of(System.getProperty("user.home"), ".rui", "data");
+                try { Files.createDirectories(userDbDir); } catch (IOException ignored) {}
+                // Tail is e.g. "data/jeve.db"; we want ~/.rui/data/jeve.db (basename only).
+                String fileName = Path.of(tail).getFileName().toString();
+                Path resolved = userDbDir.resolve(fileName);
+                return "jdbc:sqlite:" + resolved.toAbsolutePath().toString().replace('\\', '/');
+            }
+        }
+        return url;
+    }
     public String dbUsername() { return props.getProperty("db.username"); }
     public String dbPassword() { return props.getProperty("db.password", ""); }
 

@@ -176,7 +176,7 @@ html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, .main-
 #wr-scrollbar.custom-scrollbar-force { pointer-events: auto; cursor: pointer; }
 
 /* ===== Quick reply ===== */
-.qr-toolbar { display: flex; align-items: center; gap: var(--space-md); margin: var(--space-sm) 0 var(--space-md); }
+.qr-toolbar { display: flex; align-items: center; gap: var(--space-md); margin: var(--space-sm) 0 0; }
 .primary {
   background: var(--color-accent); color: #fff; border: none;
   border-radius: 8px; padding: 7px 16px; cursor: pointer; font-size: 13px;
@@ -534,19 +534,15 @@ body.page-chat-history #ctx-menu {
 .jeve-dropdown-option:hover { background: rgba(109,91,208,0.1); color: var(--color-accent); }
 .jeve-dropdown-option.selected { color: var(--color-accent); font-weight: 600; }
 
-/* Resync button spinner (replaces "已开始同步" text) */
+/* Resync button spinner — rotate the SVG itself, no external pseudo-element */
+#header-resync {
+  line-height: 0;
+}
 #header-resync.rs-spinning {
   pointer-events: none;
 }
-#header-resync.rs-spinning::after {
-  content: '';
-  display: inline-block;
-  width: 14px; height: 14px;
-  border: 2px solid rgba(96,76,199,0.25);
-  border-top-color: var(--color-accent, #604CC7);
-  border-radius: 50%;
+#header-resync.rs-spinning svg {
   animation: rs-spin 0.7s linear infinite;
-  vertical-align: middle;
 }
 @keyframes rs-spin { to { transform: rotate(360deg); } }
 

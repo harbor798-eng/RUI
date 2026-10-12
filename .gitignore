@@ -2,6 +2,9 @@
 target/
 *.class
 
+# ---- Build residue (dependency jars copied to jpackage-input) ----
+/$dep/
+
 # ---- IDE ----
 .idea/
 *.iml

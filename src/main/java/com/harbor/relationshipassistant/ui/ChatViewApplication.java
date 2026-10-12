@@ -107,42 +107,91 @@ public class ChatViewApplication extends Application {
 
     @Override
     public void start(Stage stage) {
-        AppConfig config = new AppConfig();
-        appConfig = config;
-        appDs = new DataSourceFactory(config);
-        appDs.migrate();
-        DataSourceFactory ds = appDs;
-        this.relRepo = new com.harbor.relationshipassistant.infrastructure.persistence.RelationshipRepository(ds);
-        chat = new ChatService(new ChatMessageRepository(ds), new AuditLogRepository(ds));
+        // === Startup diagnostic: write to ~/.rui/logs/startup.log early ===
+        java.nio.file.Path startupLog = null;
+        java.io.PrintWriter sw = null;
+        try {
+            java.nio.file.Path logDir = java.nio.file.Paths.get(System.getProperty("user.home"), ".rui", "logs");
+            java.nio.file.Files.createDirectories(logDir);
+            startupLog = logDir.resolve("startup.log");
+            sw = new java.io.PrintWriter(new java.io.OutputStreamWriter(
+                java.nio.file.Files.newOutputStream(startupLog,
+                    java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND),
+                java.nio.charset.StandardCharsets.UTF_8), true);
+            sw.println("===== " + java.time.LocalDateTime.now() + " RUI start =====");
+        } catch (Exception e) {
+            System.err.println("[Startup] cannot open startup.log: " + e);
+        }
+        java.io.PrintWriter finalSw = sw;
+        AppConfig config;
+        DataSourceFactory ds;
+        try {
+            if (finalSw != null) finalSw.println("[1] AppConfig loading...");
+            config = new AppConfig();
+            if (finalSw != null) finalSw.println("[2] db.url=" + config.dbUrl());
+            appConfig = config;
+            if (finalSw != null) finalSw.println("[3] DataSourceFactory.migrate()...");
+            appDs = new DataSourceFactory(config);
+            appDs.migrate();
+            ds = appDs;
+            if (finalSw != null) finalSw.println("[4a] RelationshipRepository...");
+            this.relRepo = new com.harbor.relationshipassistant.infrastructure.persistence.RelationshipRepository(ds);
+            if (finalSw != null) finalSw.println("[4b] ChatService...");
+            chat = new ChatService(new ChatMessageRepository(ds), new AuditLogRepository(ds));
+            if (finalSw != null) finalSw.println("[4c] repos done");
+        } catch (Throwable t) {
+            System.err.println("[Startup] FATAL: " + t);
+            t.printStackTrace();
+            if (finalSw != null) {
+                finalSw.println("[FATAL] " + t);
+                for (StackTraceElement el : t.getStackTrace()) finalSw.println("    at " + el);
+                if (t.getCause() != null) finalSw.println("Caused by: " + t.getCause());
+            }
+            // Show an error dialog so user sees something
+            try {
+                javafx.scene.control.Alert a = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.ERROR);
+                a.setTitle("RUI 启动失败");
+                a.setContentText(t.toString());
+                a.showAndWait();
+            } catch (Exception ignored) {}
+            return;
+        }
 
         // Phase 24: 启动 Skill 动态发现（先 Watcher 再 initialize，依靠 debounce+generation 合并启动期事件）
         try {
             java.nio.file.Path skillsRoot = java.nio.file.Paths.get("skills");
+            if (finalSw != null) finalSw.println("[Skill] candidate1=" + skillsRoot.toAbsolutePath() + " exists=" + java.nio.file.Files.isDirectory(skillsRoot));
+            if (!java.nio.file.Files.isDirectory(skillsRoot)) {
+                skillsRoot = java.nio.file.Paths.get("app", "skills");
+            }
+            if (!java.nio.file.Files.isDirectory(skillsRoot)) {
+                skillsRoot = java.nio.file.Paths.get("..", "app", "skills");
+            }
+            if (finalSw != null) finalSw.println("[Skill] skillsRoot=" + skillsRoot.toAbsolutePath() + " exists=" + java.nio.file.Files.isDirectory(skillsRoot));
+            log.info("[Skill] skillsRoot={}", skillsRoot.toAbsolutePath());
             skillManager = new com.harbor.relationshipassistant.application.skill.SkillManager(
                     skillsRoot, new com.harbor.relationshipassistant.application.skill.DefaultSkillLoader());
             skillManager.setEnablementStore(new com.harbor.relationshipassistant.application.skill.SkillEnablementStore(skillsRoot));
             skillWatcher = new com.harbor.relationshipassistant.application.skill.SkillWatcher(skillsRoot, skillManager);
             skillWatcher.start();
             skillManager.initialize();
+            if (finalSw != null) finalSw.println("[Skill] initialized ready=" + skillManager.getReadySkills().size() + " all=" + skillManager.getAllSkillsIncludingDisabled().size());
         } catch (Throwable t) {
+            if (finalSw != null) finalSw.println("[Skill] startup failed: " + t.toString());
             log.warn("[Skill] startup failed: {}", t.toString());
         }
 
         // ---- Phase 21: 首次启动检查 AI 配置 ----
+        if (finalSw != null) finalSw.println("[5] AesCryptoService + AiConfigService...");
         com.harbor.relationshipassistant.infrastructure.security.AesCryptoService crypto =
                 new com.harbor.relationshipassistant.infrastructure.security.AesCryptoService(config.aesKey());
         AiConfigService aiCfg = new AiConfigService(ds, crypto);
         boolean aiReady = aiCfg.loadView().filter(v -> v.hasKey()).isPresent();
+        if (finalSw != null) finalSw.println("[5] AI ready=" + aiReady);
         log.info("[JEVE][Startup] AI configuration detected={}", aiReady);
+        // Release: skip forced onboarding; user can configure AI later from Settings.
         if (!aiReady) {
-            log.info("[JEVE][Onboarding] Opening welcome + AI setup");
-            boolean ok = showOnboarding(stage, ds, config);
-            if (!ok) {
-                log.info("[JEVE][Onboarding] User cancelled, exiting");
-                Platform.exit();
-                return;
-            }
-            log.info("[JEVE][Onboarding] AI setup completed");
+            log.info("[JEVE][Onboarding] Skipping welcome/AI-setup dialog; entering main UI directly.");
         }
 
         // 开发调试参数 --rel=N 仍可用；正常启动从数据库选第一个 active
@@ -162,8 +211,10 @@ public class ChatViewApplication extends Application {
             }
         }
         // ---------- Load FXML main view ----------
+        if (finalSw != null) finalSw.println("[6] Loading MainView.fxml...");
         try {
             java.net.URL fxmlUrl = getClass().getResource("/fxml/MainView.fxml");
+            if (finalSw != null) finalSw.println("[6] fxmlUrl=" + fxmlUrl);
             log.info("[UI] Loading FXML from: {}", fxmlUrl);
             if (fxmlUrl == null) throw new IllegalStateException("Cannot find /fxml/MainView.fxml");
             FXMLLoader loader = new FXMLLoader(fxmlUrl);
@@ -172,6 +223,7 @@ public class ChatViewApplication extends Application {
             controllerRef = controller;
             controller.setSkillManager(skillManager);
             controller.inject(ds, config.aesKey(), relationshipId, stage);
+            if (finalSw != null) finalSw.println("[6] controller.inject done");
 
             stage.initStyle(StageStyle.TRANSPARENT);
             stage.setTitle("JEVE");
@@ -205,6 +257,17 @@ public class ChatViewApplication extends Application {
             log.info("[UI] Main FXML window shown, UNDECORATED");
         } catch (Exception e) {
             log.error("[UI] Failed to load FXML: {}", e.getMessage(), e);
+            if (finalSw != null) {
+                finalSw.println("[FATAL-UI] " + e);
+                for (StackTraceElement el : e.getStackTrace()) finalSw.println("    at " + el);
+                if (e.getCause() != null) finalSw.println("Caused by: " + e.getCause());
+            }
+            try {
+                javafx.scene.control.Alert a = new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.ERROR);
+                a.setTitle("RUI 启动失败");
+                a.setContentText(e.toString());
+                a.showAndWait();
+            } catch (Exception ignored) {}
             Platform.exit();
         }
     }

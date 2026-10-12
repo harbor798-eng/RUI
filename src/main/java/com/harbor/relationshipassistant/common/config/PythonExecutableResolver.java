@@ -34,6 +34,10 @@ public final class PythonExecutableResolver {
         p = fromLocalProperties();
         if (p != null) return p;
 
+        // Auto-detect packaged runtime: ./python-runtime/python.exe (dev) or ./app/python-runtime/python.exe (jpackage)
+        p = fromPackagedRuntime();
+        if (p != null) return p;
+
         p = fromPath();
         if (p != null) return p;
 
@@ -42,6 +46,22 @@ public final class PythonExecutableResolver {
                         + "python.executable=/path/to/python.exe to application-local.properties, "
                         + "or pass -Drui.python=/path/to/python.exe. "
                         + "Required: Python 3.9+ with wechatauto-replica installed.");
+    }
+
+    private static String fromPackagedRuntime() {
+        String[] candidates = new String[] {
+            "python-runtime/python.exe",
+            "app/python-runtime/python.exe",
+            "../app/python-runtime/python.exe",
+        };
+        for (String c : candidates) {
+            File f = new File(c);
+            if (f.isFile()) {
+                log("[PythonResolver] source=packaged-runtime resolved=" + f.getAbsolutePath());
+                return f.getAbsolutePath();
+            }
+        }
+        return null;
     }
 
     private static String fromSystemProp(String key) {
